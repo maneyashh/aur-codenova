@@ -1,0 +1,1006 @@
+/* ============================================================
+   JUDGE SIMULATION LAYER
+   Gateway · scenario cards · guided tour
+   ============================================================ */
+
+/* ---------------- Sandbox gateway ---------------- */
+
+.sim-gateway {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(1200px 700px at 50% -10%, rgba(216, 255, 79, 0.05), transparent 60%),
+    rgba(3, 5, 4, 0.58);
+  backdrop-filter: blur(26px) saturate(1.08);
+  -webkit-backdrop-filter: blur(26px) saturate(1.08);
+  overflow: hidden;
+}
+
+.sim-gateway-ambient {
+  position: absolute;
+  inset: -10%;
+  pointer-events: none;
+  overflow: hidden;
+}
+.sim-aurora {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.5;
+  mix-blend-mode: screen;
+}
+.sim-aurora--a {
+  width: 46vw;
+  height: 46vw;
+  left: 6%;
+  top: 2%;
+  background: radial-gradient(circle, rgba(216, 255, 79, 0.24), transparent 66%);
+  animation: simDriftA 22s ease-in-out infinite alternate;
+}
+.sim-aurora--b {
+  width: 40vw;
+  height: 40vw;
+  right: 2%;
+  top: 14%;
+  background: radial-gradient(circle, rgba(199, 162, 255, 0.22), transparent 66%);
+  animation: simDriftB 26s ease-in-out infinite alternate;
+}
+.sim-aurora--c {
+  width: 38vw;
+  height: 38vw;
+  left: 34%;
+  bottom: -14%;
+  background: radial-gradient(circle, rgba(255, 92, 122, 0.14), transparent 66%);
+  animation: simDriftC 30s ease-in-out infinite alternate;
+}
+.sim-gateway-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(236, 239, 231, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(236, 239, 231, 0.045) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(70% 60% at 50% 42%, #000 0%, transparent 100%);
+  -webkit-mask-image: radial-gradient(70% 60% at 50% 42%, #000 0%, transparent 100%);
+  opacity: 0.5;
+}
+.sim-gateway-noise {
+  position: absolute;
+  inset: 0;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.sim-gateway-panel {
+  position: relative;
+  width: min(1120px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  padding: 34px 38px 0;
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.085);
+  background:
+    radial-gradient(900px 340px at 16% -8%, rgba(216, 255, 79, 0.055), transparent 62%),
+    radial-gradient(700px 320px at 96% 4%, rgba(199, 162, 255, 0.05), transparent 62%),
+    linear-gradient(180deg, rgba(20, 24, 21, 0.88), rgba(9, 12, 10, 0.94));
+  backdrop-filter: blur(52px) saturate(1.5);
+  -webkit-backdrop-filter: blur(52px) saturate(1.5);
+  box-shadow:
+    0 80px 160px -60px rgba(0, 0, 0, 0.95),
+    0 0 0 1px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.03);
+}
+.sim-gateway-panel::-webkit-scrollbar {
+  width: 8px;
+}
+.sim-gateway-panel::-webkit-scrollbar-thumb {
+  background: rgba(236, 239, 231, 0.12);
+  border-radius: 8px;
+}
+.sim-gateway-hairline {
+  position: absolute;
+  top: -1px;
+  left: 12%;
+  right: 12%;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(216, 255, 79, 0.55),
+    rgba(255, 255, 255, 0.5),
+    rgba(199, 162, 255, 0.5),
+    transparent
+  );
+  filter: drop-shadow(0 0 8px rgba(216, 255, 79, 0.35));
+}
+
+/* header */
+
+.sim-gateway-head {
+  max-width: 780px;
+}
+.sim-gateway-brandrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 18px;
+}
+.sim-gateway-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--acid);
+}
+.sim-gateway-wordmark {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: var(--text);
+}
+.sim-gateway-build {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--ghost);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+.sim-gateway-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  color: var(--acid);
+  border: 1px solid rgba(216, 255, 79, 0.24);
+  background: rgba(216, 255, 79, 0.06);
+  border-radius: 999px;
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+.sim-gateway-title {
+  margin: 6px 0 0;
+  font-family: var(--font-display);
+  font-size: clamp(34px, 4.4vw, 54px);
+  font-weight: 500;
+  line-height: 1.02;
+  letter-spacing: -0.045em;
+  color: #f3f5ee;
+  text-wrap: balance;
+}
+.sim-gateway-title span {
+  color: var(--acid);
+  text-shadow: 0 0 40px rgba(216, 255, 79, 0.22);
+}
+.sim-gateway-sub {
+  margin: 14px 0 0;
+  max-width: 64ch;
+  font-size: 13.5px;
+  line-height: 1.62;
+  color: var(--text-3);
+}
+.sim-gateway-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-top: 18px;
+  padding-bottom: 4px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.sim-gateway-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sim-gateway-meta svg {
+  color: var(--acid);
+  opacity: 0.85;
+}
+
+/* cards */
+
+.sim-scenario-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 26px;
+}
+
+.crisis-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.048), rgba(255, 255, 255, 0.012)),
+    rgba(10, 13, 11, 0.5);
+  text-align: left;
+  overflow: hidden;
+  isolation: isolate;
+  transition:
+    border-color 0.22s ease,
+    box-shadow 0.28s ease,
+    background 0.22s ease;
+}
+.crisis-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 26%);
+  mask-image: linear-gradient(180deg, #000, transparent 40%);
+  -webkit-mask-image: linear-gradient(180deg, #000, transparent 40%);
+  opacity: 0.5;
+}
+.crisis-card-sheen {
+  position: absolute;
+  inset: -30%;
+  z-index: -1;
+  background: radial-gradient(420px 260px at 24% 0%, var(--card-soft), transparent 62%);
+  opacity: 0.85;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+.crisis-card:hover,
+.crisis-card.is-focused {
+  border-color: color-mix(in srgb, var(--card-accent) 42%, rgba(255, 255, 255, 0.12));
+  box-shadow:
+    0 34px 90px -42px rgba(0, 0, 0, 0.95),
+    0 0 0 1px color-mix(in srgb, var(--card-accent) 20%, transparent),
+    0 0 44px -14px color-mix(in srgb, var(--card-accent) 40%, transparent);
+}
+.crisis-card:hover .crisis-card-sheen,
+.crisis-card.is-focused .crisis-card-sheen {
+  opacity: 1;
+}
+.crisis-card:focus-visible {
+  outline: 2px solid var(--card-accent);
+  outline-offset: 3px;
+}
+.crisis-card:disabled {
+  cursor: progress;
+}
+.crisis-card.is-launching {
+  border-color: color-mix(in srgb, var(--card-accent) 60%, transparent);
+}
+
+.crisis-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 2px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+.crisis-card-code {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--card-accent);
+  white-space: nowrap;
+}
+.crisis-card-kicker {
+  color: var(--ghost);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.crisis-card-index {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 9px;
+}
+
+.crisis-card-preview {
+  position: relative;
+  display: block;
+  height: 148px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: #070908;
+}
+.crisis-preview-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.crisis-card:hover .crisis-preview-svg,
+.crisis-card.is-focused .crisis-preview-svg {
+  transform: scale(1.035);
+}
+.crisis-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 0 3px;
+}
+.crisis-card-subtitle {
+  font-family: var(--font-mono);
+  font-size: 7.2px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ghost);
+}
+.crisis-card-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.028em;
+  line-height: 1.15;
+  color: #f2f5ee;
+}
+.crisis-card-summary {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+.crisis-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 3px;
+}
+.crisis-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 7.4px;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.crisis-tag--red {
+  color: #ffb3b3;
+  border-color: rgba(255, 92, 92, 0.26);
+  background: rgba(255, 92, 92, 0.06);
+}
+.crisis-tag--amber {
+  color: #ffd7a1;
+  border-color: rgba(255, 181, 71, 0.24);
+  background: rgba(255, 181, 71, 0.05);
+}
+.crisis-tag--acid {
+  color: var(--acid);
+  border-color: rgba(216, 255, 79, 0.22);
+  background: rgba(216, 255, 79, 0.05);
+}
+.crisis-tag--blue {
+  color: #b6ceff;
+  border-color: rgba(138, 180, 255, 0.24);
+  background: rgba(138, 180, 255, 0.05);
+}
+
+.crisis-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: auto;
+  padding: 11px 3px 1px;
+  border-top: 1px solid rgba(255, 255, 255, 0.055);
+}
+.crisis-card-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  color: var(--ghost);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.crisis-file-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--card-accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--card-accent) 60%, transparent);
+}
+.crisis-card-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 8.4px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--card-accent);
+  white-space: nowrap;
+}
+.crisis-card-cta svg {
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.crisis-card:hover .crisis-card-cta svg,
+.crisis-card.is-focused .crisis-card-cta svg {
+  transform: translateX(3px);
+}
+
+.crisis-card-launch {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  background: rgba(6, 9, 7, 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--card-accent);
+}
+.crisis-launch-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.16);
+  border-top-color: var(--card-accent);
+  animation: simSpin 0.7s linear infinite;
+}
+
+/* footer */
+
+.sim-gateway-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 26px;
+  padding: 15px 2px 17px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-family: var(--font-mono);
+  font-size: 7.6px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ghost);
+}
+.sim-gateway-foot-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sim-gateway-live {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--acid);
+  box-shadow: 0 0 8px rgba(216, 255, 79, 0.7);
+  animation: simBlink 2.4s ease-in-out infinite;
+}
+.sim-gateway-keys {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  white-space: nowrap;
+}
+.sim-gateway-keys span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.sim-gateway-keys kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: rgba(236, 239, 231, 0.04);
+  font-family: var(--font-mono);
+  font-size: 7.5px;
+  color: var(--text-3);
+}
+
+/* ---------------- Guided tour ---------------- */
+
+.tour-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  pointer-events: none;
+}
+
+.tour-spotlight {
+  position: fixed;
+  top: 0;
+  left: 0;
+  border-radius: 14px;
+  pointer-events: none;
+  border: 1px solid rgba(216, 255, 79, 0.6);
+  box-shadow:
+    0 0 0 9999px rgba(4, 6, 5, 0.68),
+    0 0 24px rgba(216, 255, 79, 0.22),
+    inset 0 0 22px rgba(216, 255, 79, 0.07);
+}
+.tour-spotlight-ring {
+  position: absolute;
+  inset: -7px;
+  border-radius: 20px;
+  border: 1px solid rgba(216, 255, 79, 0.34);
+  animation: tourPulse 2.8s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+.tour-spotlight-corner {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border: 0 solid rgba(216, 255, 79, 0.9);
+}
+.tour-spotlight-corner--tl {
+  top: -3px;
+  left: -3px;
+  border-top-width: 1px;
+  border-left-width: 1px;
+  border-top-left-radius: 4px;
+}
+.tour-spotlight-corner--tr {
+  top: -3px;
+  right: -3px;
+  border-top-width: 1px;
+  border-right-width: 1px;
+  border-top-right-radius: 4px;
+}
+.tour-spotlight-corner--bl {
+  bottom: -3px;
+  left: -3px;
+  border-bottom-width: 1px;
+  border-left-width: 1px;
+  border-bottom-left-radius: 4px;
+}
+.tour-spotlight-corner--br {
+  bottom: -3px;
+  right: -3px;
+  border-bottom-width: 1px;
+  border-right-width: 1px;
+  border-bottom-right-radius: 4px;
+}
+
+.tour-scrim--solid {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 6, 5, 0.68);
+  pointer-events: none;
+}
+
+.tour-card {
+  position: fixed;
+  z-index: 151;
+  max-width: calc(100vw - 24px);
+  padding: 17px 18px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background:
+    radial-gradient(320px 160px at 12% 0%, rgba(216, 255, 79, 0.07), transparent 62%),
+    linear-gradient(180deg, rgba(23, 27, 24, 0.94), rgba(10, 13, 11, 0.97));
+  backdrop-filter: blur(34px) saturate(1.6);
+  -webkit-backdrop-filter: blur(34px) saturate(1.6);
+  box-shadow:
+    0 40px 90px -30px rgba(0, 0, 0, 0.95),
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  pointer-events: auto;
+  animation: tourGlow 4.2s ease-in-out infinite;
+}
+.tour-arrow {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  background: #171b18;
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+.tour-card--bottom .tour-arrow {
+  top: -6px;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.tour-card--top .tour-arrow {
+  bottom: -6px;
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+.tour-card--floating .tour-arrow {
+  display: none;
+}
+
+.tour-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.tour-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 7.6px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--acid);
+  white-space: nowrap;
+}
+.tour-pulse {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--acid);
+  box-shadow: 0 0 0 0 rgba(216, 255, 79, 0.6);
+  animation: tourDot 2.2s ease-out infinite;
+}
+.tour-counter {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.tour-counter span {
+  color: var(--ghost);
+}
+.tour-title {
+  margin: 10px 0 6px;
+  font-family: var(--font-display);
+  font-size: 17.5px;
+  font-weight: 500;
+  letter-spacing: -0.026em;
+  line-height: 1.2;
+  color: #f2f5ee;
+}
+.tour-body {
+  margin: 0;
+  font-size: 11.8px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+.tour-progress {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 13px;
+}
+.tour-progress-dot {
+  width: 5px;
+  height: 3px;
+  border-radius: 3px;
+  background: rgba(236, 239, 231, 0.16);
+  transition: width 0.3s cubic-bezier(0.22, 1, 0.36, 1), background 0.3s ease;
+}
+.tour-progress-dot.is-done {
+  background: rgba(216, 255, 79, 0.45);
+}
+.tour-progress-dot.is-active {
+  width: 18px;
+  background: var(--acid);
+  box-shadow: 0 0 10px rgba(216, 255, 79, 0.4);
+}
+.tour-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 13px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.065);
+}
+.tour-skip {
+  font-family: var(--font-mono);
+  font-size: 7.8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ghost);
+  transition: color 0.16s ease;
+}
+.tour-skip:hover {
+  color: var(--text-3);
+}
+.tour-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #e4ff86, #cdf43f);
+  color: #080a09;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  box-shadow:
+    0 10px 26px -10px rgba(216, 255, 79, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  transition: filter 0.16s ease, transform 0.16s ease;
+}
+.tour-cta:hover:not(:disabled) {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+.tour-cta:active:not(:disabled) {
+  transform: translateY(0);
+}
+.tour-cta:disabled {
+  cursor: progress;
+  filter: saturate(0.7) brightness(0.9);
+}
+.tour-spinner {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(8, 10, 9, 0.25);
+  border-top-color: #080a09;
+  animation: simSpin 0.7s linear infinite;
+}
+.tour-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 9px;
+  font-family: var(--font-mono);
+  font-size: 7.4px;
+  letter-spacing: 0.05em;
+  color: var(--ghost);
+}
+.tour-hint svg {
+  color: var(--faint);
+}
+
+/* ---------------- Simulation chip (topbar) ---------------- */
+
+.sim-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(236, 239, 231, 0.025);
+  font-family: var(--font-mono);
+  font-size: 7px;
+  letter-spacing: 0.1em;
+  color: var(--text-3);
+  white-space: nowrap;
+  transition: border-color 0.18s ease, color 0.18s ease;
+}
+.sim-chip:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+.sim-chip-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex: none;
+  box-shadow: 0 0 8px currentColor;
+}
+.sim-chip-code {
+  color: var(--faint);
+}
+
+/* ---------------- animations ---------------- */
+
+@keyframes simDriftA {
+  from {
+    transform: translate3d(-4%, -2%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(8%, 6%, 0) scale(1.12);
+  }
+}
+@keyframes simDriftB {
+  from {
+    transform: translate3d(4%, 2%, 0) scale(1.06);
+  }
+  to {
+    transform: translate3d(-7%, 9%, 0) scale(1);
+  }
+}
+@keyframes simDriftC {
+  from {
+    transform: translate3d(0, 4%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(6%, -6%, 0) scale(1.14);
+  }
+}
+@keyframes simSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes simBlink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes tourPulse {
+  0% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+  70% {
+    opacity: 0;
+    transform: scale(1.035);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.035);
+  }
+}
+@keyframes tourDot {
+  0% {
+    box-shadow: 0 0 0 0 rgba(216, 255, 79, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(216, 255, 79, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(216, 255, 79, 0);
+  }
+}
+@keyframes tourGlow {
+  0%,
+  100% {
+    box-shadow:
+      0 40px 90px -30px rgba(0, 0, 0, 0.95),
+      0 0 0 1px rgba(0, 0, 0, 0.35),
+      0 0 26px -8px rgba(216, 255, 79, 0.14),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
+  50% {
+    box-shadow:
+      0 40px 90px -30px rgba(0, 0, 0, 0.95),
+      0 0 0 1px rgba(0, 0, 0, 0.35),
+      0 0 38px -6px rgba(216, 255, 79, 0.26),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
+}
+
+/* ---------------- responsive ---------------- */
+
+@media (max-width: 900px) {
+  .sim-gateway {
+    padding: 14px;
+  }
+  .sim-gateway-panel {
+    padding: 26px 22px 0;
+    border-radius: 22px;
+    max-height: calc(100vh - 28px);
+  }
+  .sim-gateway-title {
+    font-size: clamp(30px, 7vw, 40px);
+  }
+  .sim-scenario-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .crisis-card {
+    gap: 11px;
+  }
+  .crisis-card-preview {
+    height: 138px;
+  }
+}
+
+@media (max-width: 560px) {
+  .sim-gateway {
+    padding: 10px;
+  }
+  .sim-gateway-panel {
+    padding: 22px 16px 0;
+    border-radius: 20px;
+    max-height: calc(100vh - 20px);
+  }
+  .sim-gateway-brandrow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding-bottom: 14px;
+  }
+  .sim-gateway-title {
+    font-size: 30px;
+  }
+  .sim-gateway-sub {
+    font-size: 12.5px;
+  }
+  .sim-gateway-meta {
+    gap: 7px 14px;
+    font-size: 7px;
+  }
+  .sim-gateway-meta span:nth-child(3) {
+    display: none;
+  }
+  .sim-scenario-grid {
+    margin-top: 18px;
+  }
+  .crisis-card {
+    padding: 12px;
+    border-radius: 16px;
+  }
+  .crisis-card-preview {
+    height: 120px;
+  }
+  .crisis-card-title {
+    font-size: 18px;
+  }
+  .crisis-card-summary {
+    font-size: 11.5px;
+  }
+  .crisis-card-kicker {
+    display: none;
+  }
+  .sim-gateway-foot {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 18px;
+    padding-bottom: 14px;
+  }
+  .sim-gateway-keys {
+    display: none;
+  }
+  .tour-card {
+    padding: 15px 15px 12px;
+    border-radius: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sim-aurora,
+  .sim-gateway-live,
+  .tour-spotlight-ring,
+  .tour-pulse,
+  .tour-card {
+    animation: none !important;
+  }
+  .crisis-preview-svg,
+  .crisis-card-cta svg {
+    transition: none;
+  }
+}
