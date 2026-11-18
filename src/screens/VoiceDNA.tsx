@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   ArrowRight,
@@ -211,7 +211,7 @@ export function VoiceDNA() {
             <button
               type="button"
               className={`btn ${committed ? 'btn-committed' : 'btn-primary'}`}
-              onClick={authorize}
+              onClick={authorize} data-tour="remediate"
             >
               {committed ? <Check size={14} strokeWidth={2.4} /> : <AudioWaveform size={14} strokeWidth={1.8} />}
               {committed ? 'Patch committed' : 'Authorize patch'}
@@ -524,3 +524,4 @@ export function VoiceDNA() {
     </div>
   );
 }
+

@@ -50,9 +50,9 @@ export function Sidebar() {
       <div className="brand-block">
         <AuraLogo />
         <div className="brand-build">
-          <span>v0.4.7</span>
+          <span>v3.0</span>
           <span className="brand-build-sep">/</span>
-          <span>LOCAL</span>
+          <span>FINAL ROUND</span>
         </div>
       </div>
 
@@ -106,7 +106,12 @@ export function Sidebar() {
       <div className="system-block">
         <div className="nav-section-label">
           <span>Systems</span>
-          <span className="nav-section-count">04</span>
+          <span className="nav-section-count">05</span>
+        </div>
+        <div className="system-row system-row--round3">
+          <StatusDot tone="acid" pulse />
+          <span className="system-name">Arbiter · Radar · Vault</span>
+          <span className="system-state">ACTIVE</span>
         </div>
         <div className="system-row">
           <StatusDot tone="acid" pulse />
@@ -134,11 +139,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      <button
-        className="palette-trigger"
-        type="button"
-        onClick={() => setPaletteOpen(true)}
-      >
+      <button className="palette-trigger" type="button" onClick={() => setPaletteOpen(true)}>
         <Command size={13} strokeWidth={1.7} />
         <span>Command console</span>
         <span className="palette-trigger-keys">

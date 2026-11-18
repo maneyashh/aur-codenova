@@ -1,4 +1,5 @@
 import type { Finding } from '../data/brand';
+import type { ScreenId } from '../state/navigation';
 
 export type ScenarioId = 'visual' | 'privacy';
 
@@ -94,7 +95,9 @@ export type Scenario = {
 export type SimPhase = 'gateway' | 'tour' | 'free';
 
 export type TourStep = {
-  id: 'run' | 'trace' | 'remediate';
+  id: 'run' | 'arbiter' | 'dom-radar' | 'vault' | 'remediate';
+  /** Screen the walkthrough navigates to when this step becomes active. */
+  screen: ScreenId;
   target: string;
   eyebrow: string;
   title: string;

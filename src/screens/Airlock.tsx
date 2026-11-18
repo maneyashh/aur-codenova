@@ -13,7 +13,6 @@ import {
 } from 'lucide-react';
 import {
   Badge,
-  Meter,
   Panel,
   PanelHead,
   ScreenHead,
@@ -28,7 +27,19 @@ import {
   entityTypeMeta,
   maskValue,
   type AirlockReport,
+  type EntityType,
 } from '../core/airlock';
+import {
+  REVOKED_TOKEN,
+  TENANTS,
+  TENANT_ORDER,
+  appendReceipt,
+  applyTenantPolicy,
+  findLedgerBreak,
+  shortHash,
+  type LedgerEntry,
+  type TenantId,
+} from '../core/vault';
 
 function EntityHighlights({ report }: { report: AirlockReport }) {
   return (
@@ -51,13 +62,19 @@ function EntityHighlights({ report }: { report: AirlockReport }) {
   );
 }
 
+const TOKEN_SPLIT = /(\[[A-Z_]+\d*\])/g;
+const TOKEN_TEST = /^\[[A-Z_]+\d*\]$/;
+
 function EgressPayload({ sanitized }: { sanitized: string }) {
-  const parts = sanitized.split(/(\[[A-Z]+_\d+\])/g);
+  const parts = sanitized.split(TOKEN_SPLIT);
   return (
     <>
       {parts.map((part, index) =>
-        /^\[[A-Z]+_\d+\]$/.test(part) ? (
-          <mark className="token-vault" key={`${part}-${index}`}>
+        TOKEN_TEST.test(part) ? (
+          <mark
+            className={`token-vault ${part === REVOKED_TOKEN ? 'token-vault--revoked' : ''}`}
+            key={`${part}-${index}`}
+          >
             {part}
           </mark>
         ) : (
@@ -67,6 +84,10 @@ function EgressPayload({ sanitized }: { sanitized: string }) {
     </>
   );
 }
+
+const CODENAME_TYPES: EntityType[] = ['CODENAME', 'PROGRAM'];
+const PERSONAL_TYPES: EntityType[] = ['PERSON', 'EMAIL', 'PHONE', 'ADDRESS'];
+const CREDENTIAL_TYPES: EntityType[] = ['SECRET', 'IP'];
 
 export function Airlock() {
   const { pushToast } = useStudio();
@@ -78,6 +99,11 @@ export function Airlock() {
   const [reveal, setReveal] = useState(false);
   const [approved, setApproved] = useState(false);
   const [externalCalls, setExternalCalls] = useState(0);
+  const [tenantId, setTenantId] = useState<TenantId>('TENANT-FINTECH');
+  const [revoked, setRevoked] = useState(false);
+  const [ledger, setLedger] = useState<LedgerEntry[]>(() =>
+    appendReceipt([], 'TENANT-FINTECH', 'VAULT_INIT', 0),
+  );
   const highlightRef = useRef<HTMLPreElement>(null);
 
   // Hydrate the ingress buffer whenever a new crisis dataset is selected.
@@ -86,12 +112,18 @@ export function Airlock() {
     setApproved(false);
     setPreviewRaw(false);
     setReveal(false);
+    setRevoked(false);
     setExternalCalls(0);
   }, [scenario?.id, scenario?.airlockPayload]);
 
   const report = useMemo(() => analyzePayload(payload), [payload]);
+  const view = useMemo(() => applyTenantPolicy(report, tenantId, revoked), [report, tenantId, revoked]);
+  const chainBreak = useMemo(() => findLedgerBreak(ledger), [ledger]);
+  const chainIntact = chainBreak === -1;
   const leaking = !armed || previewRaw;
   const uniqueTypes = Array.from(new Set(report.entities.map((entity) => entity.type)));
+  const profile = view.profile;
+  const head = ledger[ledger.length - 1];
 
   const handlePayloadChange = (value: string) => {
     setPayload(value);
@@ -116,26 +148,82 @@ export function Airlock() {
     );
   };
 
+  const selectTenant = (id: TenantId) => {
+    if (id === tenantId) return;
+    const next = applyTenantPolicy(report, id, revoked);
+    setTenantId(id);
+    setApproved(false);
+    setLedger((current) => appendReceipt(current, id, 'POLICY_SWITCH', next.redactedCount));
+    pushToast({
+      title: `${TENANTS[id].name} policy active`,
+      detail: `${next.redactedCount} of ${report.entities.length} entities vaulted · ${next.passthroughCount} pass under this tenant's policy · risk ${next.risk}.`,
+      tone: 'clear',
+    });
+  };
+
+  const toggleRevoke = () => {
+    const next = !revoked;
+    setRevoked(next);
+    setApproved(false);
+    setLedger((current) =>
+      appendReceipt(current, tenantId, next ? 'TOKENS_REVOKED' : 'TOKENS_REISSUED', view.redactedCount),
+    );
+    pushToast(
+      next
+        ? {
+            title: `${view.redactedCount} vault tokens revoked`,
+            detail: 'Every active token now resolves to [REVOKED_VAULT_TOKEN]. Egress is disabled until tokens are re-issued.',
+            tone: 'block',
+          }
+        : {
+            title: 'Vault tokens re-issued',
+            detail: `Fresh ${profile.tokenTtlMin}-minute tokens minted under ${profile.id}.`,
+            tone: 'clear',
+          },
+    );
+  };
+
+  const verifyChain = () => {
+    const probe = ledger.map((entry, index) =>
+      index === 0 ? { ...entry, entityCount: entry.entityCount + 1 } : entry,
+    );
+    const probeBreak = findLedgerBreak(probe);
+    pushToast(
+      chainIntact
+        ? {
+            title: `Receipt chain verified · ${ledger.length} receipts`,
+            detail: `Every SHA-256 link recomputed locally. A tamper probe on receipt #00 was caught at #${String(probeBreak).padStart(2, '0')}.`,
+            tone: 'clear',
+          }
+        : {
+            title: `Receipt chain broken at #${String(chainBreak).padStart(2, '0')}`,
+            detail: 'A receipt no longer matches its recomputed SHA-256 link.',
+            tone: 'block',
+          },
+    );
+  };
+
   const approveEgress = () => {
-    if (leaking || approved) return;
+    if (leaking || approved || revoked) return;
     setApproved(true);
     setExternalCalls(1);
+    setLedger((current) => appendReceipt(current, tenantId, 'EGRESS_APPROVED', view.redactedCount));
     pushToast({
       title: 'Sanitized egress approved',
-      detail: `${report.entities.length} vault tokens released · 0 raw identifiers · response rehydration gated locally.`,
+      detail: `${view.redactedCount} vault tokens released · ${view.passthroughCount} allow-listed · response rehydration gated locally.`,
       tone: 'clear',
     });
   };
 
   const copyPayload = async () => {
-    const value = leaking ? payload : report.sanitized;
+    const value = leaking ? payload : view.egress;
     try {
       await navigator.clipboard.writeText(value);
       pushToast({
         title: leaking ? 'Unsafe payload copied' : 'Sanitized payload copied',
         detail: leaking
           ? 'Warning: this payload contains raw identifiers.'
-          : `${report.entities.length} identifiers replaced with vault tokens.`,
+          : `${view.redactedCount} identifiers replaced with vault tokens.`,
         tone: leaking ? 'block' : 'clear',
       });
     } catch {
@@ -145,6 +233,15 @@ export function Airlock() {
         tone: 'info',
       });
     }
+  };
+
+  const groupState = (types: EntityType[], vaulted: string): string => {
+    if (leaking) return 'EXPOSED';
+    const rows = view.rows.filter((row) => types.includes(row.entity.type));
+    if (rows.length === 0) return 'NONE DETECTED';
+    if (rows.every((row) => row.redacted)) return revoked ? 'REVOKED' : vaulted;
+    if (rows.every((row) => !row.redacted)) return 'POLICY PASS';
+    return 'PARTIAL';
   };
 
   return (
@@ -175,7 +272,7 @@ export function Airlock() {
               onClick={() =>
                 pushToast({
                   title: 'Airlock audit trace exported',
-                  detail: `${report.entities.length} redactions · ${report.protectedCharacters} protected characters · no network egress recorded.`,
+                  detail: `${view.redactedCount} redactions · ${view.protectedCharacters} protected characters · no network egress recorded.`,
                   tone: 'clear',
                 })
               }
@@ -186,6 +283,73 @@ export function Airlock() {
           </>
         }
       />
+
+      <div className="vault-bar" data-tour="vault">
+        <div className="vault-bar-head">
+          <div className="vault-bar-title">
+            <span className="vault-kicker">Round 3 · Improvement 03</span>
+            <h2>Enterprise Multi-Tenant Policy Vault</h2>
+          </div>
+          <div className="vault-bar-actions">
+            <span className={`vault-state ${revoked ? 'is-revoked' : ''}`}>
+              <StatusDot tone={revoked ? 'red' : 'acid'} pulse={!revoked} />
+              {revoked ? 'TOKENS REVOKED' : `${view.redactedCount} TOKENS ACTIVE · TTL ${profile.tokenTtlMin}m`}
+            </span>
+            <button
+              type="button"
+              className={`btn btn-small ${revoked ? 'btn-ghost' : 'btn-danger'}`}
+              onClick={toggleRevoke}
+            >
+              <ShieldAlert size={12} strokeWidth={1.9} />
+              {revoked ? 'Re-issue Vault Tokens' : 'Revoke Vault Tokens'}
+            </button>
+          </div>
+        </div>
+
+        <div className="vault-tenants" role="tablist" aria-label="Compliance profile">
+          {TENANT_ORDER.map((id) => {
+            const tenant = TENANTS[id];
+            const active = id === tenantId;
+            return (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                className={`vault-tenant ${active ? 'is-active' : ''}`}
+                onClick={() => selectTenant(id)}
+              >
+                <span className="vault-tenant-code">{tenant.id}</span>
+                <strong>{tenant.name}</strong>
+                <span className="vault-tenant-framework">{tenant.framework}</span>
+                <span className="vault-tenant-facts">
+                  {tenant.redacts.length} classes · TTL {tenant.tokenTtlMin}m · {tenant.riskMultiplier.toFixed(1)}× risk
+                </span>
+                <span className="vault-tenant-lock">{tenant.egressLock}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="vault-ledger">
+          <span className="vault-ledger-label">
+            <LockKeyhole size={11} strokeWidth={1.8} /> AUDIT LEDGER · {String(ledger.length).padStart(2, '0')} RECEIPTS
+          </span>
+          <span className="vault-chain" aria-label="Most recent receipt hashes">
+            {ledger.slice(-4).map((entry, index, recent) => (
+              <span className="vault-hash" key={entry.hash} title={`${entry.action} · ${entry.hash}`}>
+                {shortHash(entry.hash)}
+                {index < recent.length - 1 ? <i>→</i> : null}
+              </span>
+            ))}
+          </span>
+          <span className="vault-head-hash">HEAD {shortHash(head.hash)}</span>
+          <button type="button" className="btn btn-ghost btn-small" onClick={verifyChain}>
+            <CheckCircle2 size={12} strokeWidth={1.9} />
+            Verify SHA-256 Receipt Chain ({chainIntact ? '100% Intact' : 'BROKEN'})
+          </button>
+        </div>
+      </div>
 
       <div className="grid-12 airlock-layout">
         <div className="airlock-left span-7">
@@ -200,12 +364,7 @@ export function Airlock() {
                     <StatusDot tone={armed ? 'acid' : 'red'} pulse={armed} />
                     {armed ? 'ARMED' : 'BYPASSED'}
                   </span>
-                  <Toggle
-                    checked={armed}
-                    onChange={handleArmed}
-                    label="Zero-trust"
-                    compact
-                  />
+                  <Toggle checked={armed} onChange={handleArmed} label="Zero-trust" compact />
                 </div>
               }
             />
@@ -263,11 +422,11 @@ export function Airlock() {
               </div>
               <div className="ingress-metric">
                 <span>PROTECTED</span>
-                <strong>{report.protectedCharacters}<small> CHAR</small></strong>
+                <strong>{view.protectedCharacters}<small> CHAR</small></strong>
               </div>
               <div className="ingress-metric">
                 <span>RISK INTERCEPTED</span>
-                <strong className="text-amber">{report.riskScore}<small> / 99</small></strong>
+                <strong className="text-amber">{view.risk}<small> / 99</small></strong>
               </div>
               <div className="ingress-types">
                 {uniqueTypes.slice(0, 5).map((type) => (
@@ -295,7 +454,7 @@ export function Airlock() {
             <PanelHead
               kicker="Detection register"
               title="Entity vault"
-              meta={`${report.entities.length} ENTITIES / ${uniqueTypes.length} CLASSES`}
+              meta={`${view.redactedCount} VAULTED / ${view.passthroughCount} PASS · ${profile.id}`}
               actions={
                 <button
                   type="button"
@@ -311,23 +470,29 @@ export function Airlock() {
               <div className="entity-row entity-row--head">
                 <span>Class</span>
                 <span>Detected value</span>
-                <span>Vault token</span>
+                <span>Egress token</span>
                 <span>Rule</span>
                 <span>Conf.</span>
               </div>
-              {report.entities.map((entity) => (
-                <div className="entity-row" key={entity.id}>
-                  <span className={`entity-type ${entityTypeMeta[entity.type].className}`}>
-                    <i>{entityTypeMeta[entity.type].short}</i>
-                    {entityTypeMeta[entity.type].label}
+              {view.rows.map((row) => (
+                <div className="entity-row" key={row.entity.id}>
+                  <span className={`entity-type ${entityTypeMeta[row.entity.type].className}`}>
+                    <i>{entityTypeMeta[row.entity.type].short}</i>
+                    {entityTypeMeta[row.entity.type].label}
                   </span>
                   <span className="entity-raw">
-                    {reveal ? entity.raw : maskValue(entity.raw)}
+                    {reveal ? row.entity.raw : maskValue(row.entity.raw)}
                   </span>
-                  <span className="entity-token">{entity.token}</span>
-                  <span className="entity-rule">{entity.rule}</span>
+                  <span
+                    className={`entity-token ${
+                      !row.redacted ? 'is-pass' : revoked ? 'is-revoked' : ''
+                    }`}
+                  >
+                    {row.redacted ? row.token : row.allowListed ? 'ALLOW-LISTED' : 'POLICY PASS'}
+                  </span>
+                  <span className="entity-rule">{row.entity.rule}</span>
                   <span className="entity-confidence">
-                    {(entity.confidence * 100).toFixed(1)}
+                    {(row.entity.confidence * 100).toFixed(1)}
                   </span>
                 </div>
               ))}
@@ -339,7 +504,7 @@ export function Airlock() {
             </div>
             <div className="entity-foot">
               <span>{reveal ? 'RAW VALUES VISIBLE ON LOCAL NODE ONLY' : 'VALUES MASKED · REVEAL IS LOCAL-ONLY'}</span>
-              <span>LEXICON v9 + 4 REGEX PATTERNS</span>
+              <span>LEXICON v9 + 4 REGEX PATTERNS · {profile.id}</span>
             </div>
           </Panel>
         </div>
@@ -350,8 +515,8 @@ export function Airlock() {
             title="External payload"
             meta="TARGET / SANDBOX MODEL"
             actions={
-              <Badge tone={leaking ? 'red' : 'acid'} dot>
-                {leaking ? 'LEAK' : 'SANITIZED'}
+              <Badge tone={leaking ? 'red' : revoked ? 'amber' : 'acid'} dot>
+                {leaking ? 'LEAK' : revoked ? 'REVOKED' : 'SANITIZED'}
               </Badge>
             }
           />
@@ -366,7 +531,9 @@ export function Airlock() {
             <div className={`flow-node flow-node--shield ${leaking ? 'is-bypassed' : 'is-armed'}`}>
               {leaking ? <ShieldAlert size={15} strokeWidth={1.7} /> : <ShieldCheck size={15} strokeWidth={1.7} />}
               <strong>AIRLOCK</strong>
-              <span className="flow-node-meta">{leaking ? 'bypassed' : '10 tokens'}</span>
+              <span className="flow-node-meta">
+                {leaking ? 'bypassed' : revoked ? 'revoked' : `${view.redactedCount} tokens`}
+              </span>
             </div>
             <span className="flow-link">····</span>
             <div className={`flow-node ${leaking ? 'flow-node--danger' : ''}`}>
@@ -398,26 +565,34 @@ export function Airlock() {
 
           <div className={`egress-preview ${leaking ? 'is-leaking' : ''}`}>
             <div className="egress-preview-head">
-              <span>PAYLOAD / {leaking ? 'RAW' : 'MASKED'}</span>
+              <span>PAYLOAD / {leaking ? 'RAW' : 'MASKED'} · {profile.id}</span>
               <button type="button" className="icon-button" onClick={copyPayload} aria-label="Copy payload">
                 <Copy size={12} strokeWidth={1.8} />
               </button>
             </div>
             <pre className="egress-code">
-              {leaking ? <EntityHighlights report={report} /> : <EgressPayload sanitized={report.sanitized} />}
+              {leaking ? <EntityHighlights report={report} /> : <EgressPayload sanitized={view.egress} />}
             </pre>
             <div className="egress-preview-foot">
-              <span className={leaking ? 'text-red' : 'text-acid'}>
-                {leaking ? 'RAW IDENTIFIERS EXPOSED' : '0 RAW IDENTIFIERS'}
+              <span className={leaking ? 'text-red' : view.passthroughCount > 0 ? 'text-amber' : 'text-acid'}>
+                {leaking
+                  ? 'RAW IDENTIFIERS EXPOSED'
+                  : view.passthroughCount > 0
+                    ? `${view.passthroughCount} PASS UNMASKED BY POLICY`
+                    : '0 RAW IDENTIFIERS'}
               </span>
-              <span>{leaking ? `${report.entities.length} SECRETS VISIBLE` : `${report.entities.length} TOKENS / ${report.protectedCharacters} CHARS MASKED`}</span>
+              <span>
+                {leaking
+                  ? `${report.entities.length} SECRETS VISIBLE`
+                  : `${view.redactedCount} TOKENS / ${view.protectedCharacters} CHARS MASKED`}
+              </span>
             </div>
           </div>
 
           <div className="egress-stats">
             <div>
               <span>ENTITIES MASKED</span>
-              <strong>{String(report.entities.length).padStart(2, '0')}</strong>
+              <strong>{String(view.redactedCount).padStart(2, '0')}</strong>
             </div>
             <div>
               <span>RAW CHARS</span>
@@ -425,7 +600,7 @@ export function Airlock() {
             </div>
             <div>
               <span>RISK SCORE</span>
-              <strong className={leaking ? 'text-red' : 'text-amber'}>{report.riskScore}</strong>
+              <strong className={leaking ? 'text-red' : 'text-amber'}>{view.risk}</strong>
             </div>
             <div>
               <span>EXTERNAL CALLS</span>
@@ -436,18 +611,18 @@ export function Airlock() {
           <div className="egress-policies">
             <div className="egress-policy-row">
               <LockKeyhole size={11} />
-              <span>Classified codenames</span>
-              <strong>{leaking ? 'EXPOSED' : 'VAULTED'}</strong>
+              <span>Classified codenames & programs</span>
+              <strong>{groupState(CODENAME_TYPES, 'VAULTED')}</strong>
             </div>
             <div className="egress-policy-row">
               <LockKeyhole size={11} />
               <span>Personal identifiers</span>
-              <strong>{leaking ? 'EXPOSED' : 'MASKED'}</strong>
+              <strong>{groupState(PERSONAL_TYPES, 'MASKED')}</strong>
             </div>
             <div className="egress-policy-row">
               <LockKeyhole size={11} />
-              <span>Live credentials</span>
-              <strong>{leaking ? 'EXPOSED' : 'REPLACED'}</strong>
+              <span>Live credentials & network</span>
+              <strong>{groupState(CREDENTIAL_TYPES, 'REPLACED')}</strong>
             </div>
             <div className="egress-policy-row">
               <LockKeyhole size={11} />
@@ -460,15 +635,23 @@ export function Airlock() {
             type="button"
             className={`btn btn-full ${approved ? 'btn-committed' : leaking ? 'btn-danger' : 'btn-primary'}`}
             onClick={approveEgress}
-            disabled={approved || leaking}
+            disabled={approved || leaking || revoked}
           >
-            {approved ? <Check size={14} strokeWidth={2.4} /> : leaking ? <ShieldAlert size={14} /> : <ShieldCheck size={14} strokeWidth={1.8} />}
+            {approved ? (
+              <Check size={14} strokeWidth={2.4} />
+            ) : leaking || revoked ? (
+              <ShieldAlert size={14} />
+            ) : (
+              <ShieldCheck size={14} strokeWidth={1.8} />
+            )}
             {approved
               ? 'Egress approved · tokens only'
               : leaking
                 ? 'Seal airlock before egress'
-                : 'Approve sanitized egress'}
-            {!approved && !leaking ? <ArrowRight size={12} className="btn-tail" /> : null}
+                : revoked
+                  ? 'Tokens revoked · re-issue to egress'
+                  : 'Approve sanitized egress'}
+            {!approved && !leaking && !revoked ? <ArrowRight size={12} className="btn-tail" /> : null}
           </button>
 
           <div className="egress-foot">
@@ -485,11 +668,11 @@ export function Airlock() {
         </div>
         <div className="audit-item">
           <span className="audit-label">NETWORK EGRESS</span>
-          <span className="audit-value">{externalCalls === 0 ? '0 BYTES' : `${report.entities.length} VAULT TOKENS`}</span>
+          <span className="audit-value">{externalCalls === 0 ? '0 BYTES' : `${view.redactedCount} VAULT TOKENS`}</span>
         </div>
         <div className="audit-item">
           <span className="audit-label">VAULT SEAL</span>
-          <span className="audit-value">SHA-256 / LOCAL</span>
+          <span className="audit-value">SHA-256 · {profile.egressLock}</span>
         </div>
         <div className="audit-item">
           <span className="audit-label">MODEL</span>
@@ -504,8 +687,8 @@ export function Airlock() {
       <div className="page-footline">
         <span><StatusDot tone="acid" /> AIRLOCK NOMINAL · NO RAW EGRESS</span>
         <span>{report.entities.length} ENTITIES</span>
-        <span>{report.protectedCharacters} CHARACTERS PROTECTED</span>
-        <span className="footline-right">SESSION HASH 9F2C…C41A</span>
+        <span>{view.protectedCharacters} CHARACTERS PROTECTED</span>
+        <span className="footline-right">LEDGER HEAD {shortHash(head.hash)}</span>
       </div>
     </div>
   );

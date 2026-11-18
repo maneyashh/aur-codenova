@@ -17,6 +17,7 @@ const CARD_WIDTH = 348;
 const VIEWPORT_GUTTER = 16;
 const ANCHOR_GAP = 18;
 const SPOTLIGHT_PAD = 9;
+const TOP_SAFE = 64;
 
 const spring = { type: 'spring', stiffness: 260, damping: 28, mass: 0.7 } as const;
 
@@ -73,6 +74,8 @@ export function TourLayer() {
     });
   }, [measure]);
 
+  // Locate the step's target. Cross-screen steps may mount a beat after the
+  // navigation, so the lookup retries briefly before falling back to a floating card.
   useLayoutEffect(() => {
     if (!tourActive || !step) {
       targetRef.current = null;
@@ -81,24 +84,49 @@ export function TourLayer() {
       return;
     }
 
-    const element = document.querySelector<HTMLElement>(`[data-tour="${step.target}"]`);
-    targetRef.current = element;
-    if (!element) {
+    let cancelled = false;
+    let attempts = 0;
+    let retry: number | undefined;
+    let settleTimer: number | undefined;
+    const selector = `[data-tour="${step.target}"]`;
+
+    const attach = (element: HTMLElement) => {
+      targetRef.current = element;
+      setSettled(false);
+      element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+      measure();
+      settleTimer = window.setTimeout(() => {
+        measure();
+        setSettled(true);
+      }, 520);
+    };
+
+    const first = document.querySelector<HTMLElement>(selector);
+    if (first) {
+      attach(first);
+    } else {
+      targetRef.current = null;
       setAnchor(null);
-      setSettled(true);
-      return;
+      setSettled(false);
+      retry = window.setInterval(() => {
+        if (cancelled) return;
+        attempts += 1;
+        const found = document.querySelector<HTMLElement>(selector);
+        if (found) {
+          window.clearInterval(retry);
+          attach(found);
+        } else if (attempts >= 8) {
+          window.clearInterval(retry);
+          setSettled(true);
+        }
+      }, 120);
     }
 
-    setSettled(false);
-    element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
-    measure();
-
-    const settleTimer = window.setTimeout(() => {
-      measure();
-      setSettled(true);
-    }, 520);
-
-    return () => window.clearTimeout(settleTimer);
+    return () => {
+      cancelled = true;
+      window.clearInterval(retry);
+      window.clearTimeout(settleTimer);
+    };
   }, [measure, step, tourActive, screen]);
 
   useEffect(() => {
@@ -186,11 +214,15 @@ export function TourLayer() {
       )
     : Math.max(VIEWPORT_GUTTER, (viewport.width - CARD_WIDTH) / 2);
 
-  const cardTop = anchor
+  const rawTop = anchor
     ? placeTop
       ? anchor.top - ANCHOR_GAP - cardHeight
       : anchor.bottom + ANCHOR_GAP
     : Math.max(72, viewport.height / 2 - cardHeight / 2);
+
+  // Tall targets (the DOM radar panel) may leave no room on either side; keep the card on screen.
+  const cardTop = clamp(rawTop, TOP_SAFE, Math.max(TOP_SAFE, viewport.height - cardHeight - VIEWPORT_GUTTER));
+  const coversTarget = anchor ? cardTop < anchor.bottom && cardTop + cardHeight > anchor.top : false;
 
   const arrowX = anchor
     ? clamp(anchor.left + anchor.width / 2 - cardLeft, 28, CARD_WIDTH - 28)
@@ -231,7 +263,7 @@ export function TourLayer() {
           role="dialog"
           aria-label={`${step.title} — tour step ${stepIndex + 1} of ${steps.length}`}
         >
-          {anchor ? (
+          {anchor && !coversTarget ? (
             <span className="tour-arrow" style={{ left: arrowX }} aria-hidden="true" />
           ) : null}
 
@@ -265,12 +297,7 @@ export function TourLayer() {
             <button type="button" className="tour-skip" onClick={skipTour}>
               Skip tour
             </button>
-            <button
-              type="button"
-              className="tour-cta"
-              onClick={nextStep}
-              disabled={scanning}
-            >
+            <button type="button" className="tour-cta" onClick={nextStep} disabled={scanning}>
               {scanning ? <span className="tour-spinner" /> : null}
               {step.id === 'remediate' ? <Sparkles size={13} strokeWidth={1.9} /> : null}
               {ctaLabel}

@@ -1,9 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Bell, CircleHelp, Search } from 'lucide-react';
+import { Search, Sparkles } from 'lucide-react';
 import { screenMeta } from '../state/navigation';
 import { useStudio } from '../state/studio';
 import { useSimulation } from '../sim/SimulationProvider';
+import type { ScenarioId } from '../sim/types';
 import { Kbd, StatusDot } from './ui';
+
+const DATASETS: Array<{ id: ScenarioId; label: string }> = [
+  { id: 'visual', label: 'Dataset A: Visual Crisis' },
+  { id: 'privacy', label: 'Dataset B: Privacy Breach' },
+];
 
 function utcClock() {
   const now = new Date();
@@ -27,7 +33,7 @@ function utcClock() {
 
 export function Topbar() {
   const { screen, setPaletteOpen } = useStudio();
-  const { scenario, openGateway } = useSimulation();
+  const { scenario, switchScenario, restartTour } = useSimulation();
   const meta = screenMeta(screen);
   const [clock, setClock] = useState(utcClock);
 
@@ -60,19 +66,22 @@ export function Topbar() {
           <Kbd>K</Kbd>
         </button>
 
-        <button
-          type="button"
-          className="sim-chip"
-          onClick={openGateway}
-          title="Open the judge simulation gateway"
-          aria-label="Switch crisis scenario"
-        >
-          <span
-            className="sim-chip-dot"
-            style={{ background: scenario?.accent ?? 'var(--muted)' }}
-          />
-          <span>{scenario ? scenario.code : 'JUDGE SIM'}</span>
-        </button>
+        <div className="dataset-switch" role="group" aria-label="Crisis dataset">
+          {DATASETS.map((dataset) => {
+            const active = scenario?.id === dataset.id;
+            return (
+              <button
+                key={dataset.id}
+                type="button"
+                className={`dataset-switch-item ${active ? 'is-active' : ''}`}
+                aria-pressed={active}
+                onClick={() => switchScenario(dataset.id)}
+              >
+                {dataset.label}
+              </button>
+            );
+          })}
+        </div>
 
         <div className="system-chip" title="Clearance engine status">
           <StatusDot tone="acid" pulse />
@@ -86,12 +95,9 @@ export function Topbar() {
           <span className="clock-zone">UTC</span>
         </div>
 
-        <button type="button" className="icon-button icon-button--top" aria-label="Notifications">
-          <Bell size={15} strokeWidth={1.7} />
-          <span className="notification-dot" />
-        </button>
-        <button type="button" className="icon-button icon-button--top" aria-label="Help">
-          <CircleHelp size={15} strokeWidth={1.7} />
+        <button type="button" className="btn btn-primary btn-small judge-btn" onClick={restartTour}>
+          <Sparkles size={12} strokeWidth={2} />
+          Judge Walkthrough — Complete Guide
         </button>
       </div>
     </header>

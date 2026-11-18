@@ -23,6 +23,8 @@ type SimulationContextValue = {
   scanRequested: boolean;
   pipelineComplete: boolean;
   selectScenario: (id: ScenarioId) => void;
+  /** One-click dataset switch from the topbar. Restarts the tour only if one is running. */
+  switchScenario: (id: ScenarioId) => void;
   openGateway: () => void;
   closeGateway: () => void;
   nextStep: () => void;
@@ -78,6 +80,30 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     [navigate, pushToast, setHeatmap, setPaletteOpen, setPublishOffset],
   );
 
+  const switchScenario = useCallback(
+    (id: ScenarioId) => {
+      if (id === scenarioId && phase !== 'gateway') return;
+      if (phase === 'tour' || phase === 'gateway') {
+        selectScenario(id);
+        return;
+      }
+      // Free exploration: hydrate in place, stay on the current screen.
+      const next = SCENARIOS[id];
+      if (scanTimer.current) window.clearTimeout(scanTimer.current);
+      setScenarioId(id);
+      setScanRequested(false);
+      setPipelineComplete(false);
+      setPublishOffset(next.publishOffset);
+      setHeatmap(id === 'visual');
+      pushToast({
+        title: `${next.code} hydrated · ${next.asset.name}`,
+        detail: 'Dataset switched in place. Deterministic engines re-armed. Nothing has been uploaded.',
+        tone: 'clear',
+      });
+    },
+    [phase, pushToast, scenarioId, selectScenario, setHeatmap, setPublishOffset],
+  );
+
   const openGateway = useCallback(() => {
     setPhase('gateway');
     setPaletteOpen(false);
@@ -104,6 +130,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   const nextStep = useCallback(() => {
     if (phase !== 'tour') return;
 
+    // Step 01 gates on the real pipeline finishing.
     if (stepIndex === 0) {
       if (!scanRequested) {
         markPipelineStarted();
@@ -111,12 +138,12 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (!pipelineComplete) return;
-      setStepIndex(1);
-      return;
     }
 
-    if (stepIndex === 1) {
-      setStepIndex(2);
+    const upcoming = TOUR_STEPS[stepIndex + 1];
+    if (upcoming) {
+      setStepIndex(stepIndex + 1);
+      navigate(upcoming.screen);
       return;
     }
 
@@ -155,7 +182,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     navigate('command');
   }, [navigate, scenarioId]);
 
-  // Advance to step 2 only after the deterministic pipeline actually seals.
+  // Advance from step 01 only after the deterministic pipeline actually seals.
   useEffect(() => {
     if (phase !== 'tour' || stepIndex !== 0 || !pipelineComplete) return;
     completeTimer.current = window.setTimeout(() => {
@@ -183,6 +210,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       scanRequested,
       pipelineComplete,
       selectScenario,
+      switchScenario,
       openGateway,
       closeGateway,
       nextStep,
@@ -198,6 +226,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       scanRequested,
       pipelineComplete,
       selectScenario,
+      switchScenario,
       openGateway,
       closeGateway,
       nextStep,

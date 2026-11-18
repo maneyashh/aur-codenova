@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowRight,
   ArrowUpRight,
   AudioWaveform,
   BadgeCheck,
   Check,
+  Cpu,
   FileText,
   Film,
   Image as ImageIcon,
@@ -15,6 +17,7 @@ import {
   ShieldCheck,
   Sparkles,
   Waypoints,
+  Zap,
 } from 'lucide-react';
 import {
   Badge,
@@ -43,9 +46,11 @@ import {
 } from '../data/overview';
 import { brandProfile } from '../data/brand';
 import { TODAY, addDays, formatShortDate } from '../core/claims';
+import { ARBITER_THRESHOLD, runArbiterPass } from '../core/arbiter';
 
 type Phase = 'complete' | 'running';
 type FeedFilter = 'ALL' | 'FLAGGED' | 'CLEARED';
+type ArbiterLog = { time: string; text: string; fallback: boolean };
 
 const stageIcons = [Layers, ShieldCheck, ScanEye, Waypoints, AudioWaveform, BadgeCheck];
 
@@ -68,6 +73,8 @@ const stageToneClass = {
   amber: 'is-amber',
   red: 'is-red',
 } as const;
+
+const utcStamp = () => new Date().toISOString().slice(11, 23);
 
 function RadarChart() {
   const size = 320;
@@ -116,20 +123,10 @@ function RadarChart() {
         return (
           <g key={axis.label}>
             <circle cx={x} cy={y} r="2.2" className="radar-dot" />
-            <text
-              x={labelX}
-              y={labelY + 2.5}
-              textAnchor={anchor}
-              className="radar-label"
-            >
+            <text x={labelX} y={labelY + 2.5} textAnchor={anchor} className="radar-label">
               {axis.label}
             </text>
-            <text
-              x={labelX}
-              y={labelY + 12}
-              textAnchor={anchor}
-              className="radar-value"
-            >
+            <text x={labelX} y={labelY + 12} textAnchor={anchor} className="radar-value">
               {axis.value}
             </text>
           </g>
@@ -148,6 +145,8 @@ export function Overview() {
   const [stageIndex, setStageIndex] = useState(pipelineStages.length);
   const [logs, setLogs] = useState(initialCompileLogs);
   const [filter, setFilter] = useState<FeedFilter>('ALL');
+  const [stress, setStress] = useState(false);
+  const [arbiterLogs, setArbiterLogs] = useState<ArbiterLog[]>([]);
   const previousToken = useRef(compileToken);
 
   const asset = scenario?.asset;
@@ -178,12 +177,20 @@ export function Overview() {
   const [titleMain, ...titleRestParts] = (asset?.title ?? 'Orbital Launch — Hero 07').split(' — ');
   const titleRest = titleRestParts.join(' — ');
 
+  const arbiter = useMemo(
+    () => runArbiterPass(scenario?.id ?? null, stress),
+    [scenario?.id, stress],
+  );
+  const lowestPrimary = Math.min(...arbiter.routes.map((route) => route.primaryConfidence));
+
   useEffect(() => {
     if (compileToken === previousToken.current) return;
     previousToken.current = compileToken;
     setPhase('running');
     setStageIndex(0);
     setLogs([]);
+    setStress(false);
+    setArbiterLogs([]);
   }, [compileToken]);
 
   useEffect(() => {
@@ -253,6 +260,28 @@ export function Overview() {
     navigate('voice');
   };
 
+  const toggleEdgeCase = () => {
+    if (stress) {
+      setStress(false);
+      setArbiterLogs([]);
+      return;
+    }
+    const pass = runArbiterPass(scenario?.id ?? null, true);
+    setStress(true);
+    setArbiterLogs(
+      pass.traceLines.map((line) => ({
+        time: utcStamp(),
+        text: line.replace(/^\[ARBITER\]\s*/, ''),
+        fallback: !line.includes('no fallback'),
+      })),
+    );
+    pushToast({
+      title: `Arbiter resolved ${pass.fallbacksTriggered} edge cases · 0 external calls`,
+      detail: `Confidence below ${ARBITER_THRESHOLD.toFixed(2)} rerouted to local AST/WASM engines → ${(pass.overallConfidence * 100).toFixed(1)}% in ${pass.totalMs.toFixed(1)}ms. Zero external model leakage.`,
+      tone: 'clear',
+    });
+  };
+
   return (
     <div className="page page--overview">
       <ScreenHead
@@ -271,11 +300,7 @@ export function Overview() {
         }
         actions={
           <>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => navigate('temporal')}
-            >
+            <button type="button" className="btn btn-ghost" onClick={() => navigate('temporal')}>
               <Waypoints size={14} strokeWidth={1.7} />
               Open claim ledger
             </button>
@@ -440,6 +465,16 @@ export function Overview() {
                   <span className="log-text">{log.text}</span>
                 </div>
               ))}
+              {arbiterLogs.map((log, index) => (
+                <div
+                  className={`console-line console-line--arbiter ${log.fallback ? 'is-fallback' : ''}`}
+                  key={`arbiter-${index}`}
+                >
+                  <span className="log-time">{log.time}</span>
+                  <span className="log-stage">[ARBITER]</span>
+                  <span className="log-text">{log.text}</span>
+                </div>
+              ))}
               {phase === 'running' ? (
                 <div className="console-line console-line--active">
                   <span className="log-time">··:··:··.···</span>
@@ -462,7 +497,9 @@ export function Overview() {
               <span className="console-foot-item">
                 <LockKeyhole size={10} strokeWidth={1.8} /> TRACE SEALED
               </span>
-              <span className="console-foot-item">{String(logs.length).padStart(2, '0')} EVENTS</span>
+              <span className="console-foot-item">
+                {String(logs.length + arbiterLogs.length).padStart(2, '0')} EVENTS
+              </span>
               <span className="console-foot-item">SHA-256 9F2C…C41A</span>
               <span className="console-foot-right">0 MODEL CALLS</span>
             </div>
@@ -529,15 +566,107 @@ export function Overview() {
             ))}
           </div>
 
-          <button
-            type="button"
-            className="btn btn-ghost btn-full"
-            onClick={() => navigate('visual')}
-          >
+          <button type="button" className="btn btn-ghost btn-full" onClick={() => navigate('visual')}>
             <ScanEye size={14} strokeWidth={1.7} />
             Open forensic readout
             <ArrowUpRight size={12} className="btn-tail" />
           </button>
+        </Panel>
+      </div>
+
+      <div className="arbiter-wrap" data-tour="arbiter">
+        <Panel className="arbiter-panel" bracket>
+          <PanelHead
+            kicker="Round 3 · Improvement 01"
+            title="Autonomous Multi-Model Arbiter"
+            meta={`CUTOFF ${ARBITER_THRESHOLD.toFixed(2)} · 0 EXTERNAL LLM CALLS`}
+            actions={
+              <button
+                type="button"
+                className={`btn btn-small ${stress ? 'btn-ghost' : 'btn-primary'}`}
+                onClick={toggleEdgeCase}
+              >
+                <Zap size={12} strokeWidth={2} />
+                {stress ? 'Reset to nominal' : 'Simulate <0.85 Edge Case'}
+              </button>
+            }
+          />
+
+          <div className="arbiter-body">
+            <div className="arbiter-gauge">
+              <div className="arbiter-gauge-top">
+                <span className="arbiter-gauge-label">CONFIDENCE GAUGE</span>
+                <strong className={arbiter.fallbacksTriggered > 0 ? 'is-resolved' : ''}>
+                  {(arbiter.overallConfidence * 100).toFixed(1)}%
+                </strong>
+              </div>
+              <div
+                className="arbiter-track"
+                role="img"
+                aria-label={`Overall confidence ${(arbiter.overallConfidence * 100).toFixed(1)} percent, cutoff ${ARBITER_THRESHOLD}`}
+              >
+                <i className="arbiter-fill" style={{ width: `${arbiter.overallConfidence * 100}%` }} />
+                <i className="arbiter-low" style={{ left: `${lowestPrimary * 100}%` }} />
+                <i className="arbiter-cutoff" style={{ left: `${ARBITER_THRESHOLD * 100}%` }}>
+                  <span>{ARBITER_THRESHOLD.toFixed(2)}</span>
+                </i>
+              </div>
+              <div className="arbiter-gauge-foot">
+                <span>LOWEST PRIMARY {lowestPrimary.toFixed(2)}</span>
+                <span>
+                  {arbiter.fallbacksTriggered} FALLBACKS · {arbiter.totalMs.toFixed(1)}ms
+                </span>
+              </div>
+            </div>
+
+            <div className="arbiter-lanes">
+              <div className="arbiter-lane arbiter-lane--head">
+                <span>LANE</span>
+                <span>PRIMARY ENGINE</span>
+                <span>CONFIDENCE</span>
+                <span />
+                <span>SECONDARY AST/WASM FALLBACK</span>
+                <span>RESOLVED</span>
+              </div>
+              {arbiter.routes.map((route) => (
+                <div
+                  className={`arbiter-lane ${route.fellBack ? 'is-fallback' : ''}`}
+                  key={route.lane}
+                  title={route.edgeCase}
+                >
+                  <span className="arbiter-lane-name">{route.lane}</span>
+                  <span className="arbiter-cell">
+                    <strong>{route.primaryEngine}</strong>
+                    <em>{route.fellBack ? route.edgeCase : 'nominal'}</em>
+                  </span>
+                  <span className="arbiter-cell">
+                    <strong className={route.fellBack ? 'is-low' : ''}>
+                      {route.primaryConfidence.toFixed(2)}
+                    </strong>
+                    <span className="arbiter-mini">
+                      <i style={{ width: `${route.primaryConfidence * 100}%` }} />
+                      <b style={{ left: `${ARBITER_THRESHOLD * 100}%` }} />
+                    </span>
+                  </span>
+                  <ArrowRight size={12} strokeWidth={1.8} className="arbiter-arrow" />
+                  <span className="arbiter-cell">
+                    <strong>{route.fellBack ? route.secondaryEngine : 'not required'}</strong>
+                    <em>{route.fellBack ? `${route.ms}ms · local` : 'primary accepted'}</em>
+                  </span>
+                  <span className="arbiter-resolved">
+                    {(route.resolvedConfidence * 100).toFixed(1)}%
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="arbiter-foot">
+            <span>
+              <Cpu size={11} strokeWidth={1.7} /> DETERMINISTIC LOCAL FALLBACK · NO NETWORK
+            </span>
+            <span>{arbiter.routes.reduce((sum, route) => sum + route.externalLlmCalls, 0)} EXTERNAL LLM CALLS</span>
+          </div>
         </Panel>
       </div>
 
@@ -609,10 +738,7 @@ export function Overview() {
                   onClick={() => openAsset(asset.status, asset.kind)}
                 >
                   <span className="feed-asset">
-                    <span
-                      className="feed-thumb"
-                      style={{ ['--asset-tint' as string]: asset.tint }}
-                    >
+                    <span className="feed-thumb" style={{ ['--asset-tint' as string]: asset.tint }}>
                       <Icon size={12} strokeWidth={1.6} />
                     </span>
                     <span className="feed-asset-copy">

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import {
   ArrowUpRight,
   ChevronDown,
@@ -6,6 +6,7 @@ import {
   Image as ImageIcon,
   RefreshCw,
   ScanLine,
+  ShieldCheck,
   SlidersHorizontal,
 } from 'lucide-react';
 import { Badge, Meter, Panel, PanelHead, RingGauge, ScreenHead, StatusDot } from '../components/ui';
@@ -20,6 +21,14 @@ import {
 import { DEFAULT_POSTER, paletteForScenario } from '../sim/scenarios';
 import { useScenario } from '../sim/SimulationProvider';
 import type { PosterTheme } from '../sim/types';
+import {
+  BRAND_BASELINE_HEX,
+  BRAND_BASELINE_TOKEN,
+  ROGUE_PRESETS,
+  createDomRadar,
+  type DomRadar,
+  type DriftReading,
+} from '../core/domRadar';
 
 type PosterProps = {
   heatmap: boolean;
@@ -179,14 +188,7 @@ function PosterArtifact({ heatmap, geometry, probes, theme }: PosterProps) {
             strokeOpacity="0.1"
             strokeDasharray="1 4"
           />
-          <circle
-            cx="400"
-            cy="326"
-            r="212"
-            fill="none"
-            stroke={t.ink}
-            strokeOpacity="0.06"
-          />
+          <circle cx="400" cy="326" r="212" fill="none" stroke={t.ink} strokeOpacity="0.06" />
           <path d="M400 104V548M178 326H622" stroke={t.ink} strokeOpacity="0.05" />
           <path d="M400 112v10M400 530v10M184 326h10M606 326h10" stroke={t.accent} strokeOpacity="0.4" />
         </g>
@@ -385,13 +387,13 @@ function PosterArtifact({ heatmap, geometry, probes, theme }: PosterProps) {
               strokeOpacity="0.85"
               strokeDasharray="3 3"
             />
-            <text x="232" y="13" fill="#FFB547" fontSize="5.6" fontFamily="'JetBrains Mono', monospace">
+            <text x="232" y="14" fill="#FFB547" fontSize="9" fontFamily="'JetBrains Mono', monospace">
               CLEARSPACE / REQ 24px · ACT 18px
             </text>
             <path d="M220 24h-8v40h8" fill="none" stroke="#FFB547" strokeOpacity="0.5" />
 
             <path d="M44 568H676M44 714H676" stroke={t.accent} strokeOpacity="0.22" strokeDasharray="2 5" />
-            <text x="610" y="565" fill={t.accent} fillOpacity="0.55" fontSize="5.4" fontFamily="'JetBrains Mono', monospace">
+            <text x="590" y="565" fill={t.accent} fillOpacity="0.7" fontSize="9" fontFamily="'JetBrains Mono', monospace">
               CAP 84 / 76
             </text>
 
@@ -399,14 +401,14 @@ function PosterArtifact({ heatmap, geometry, probes, theme }: PosterProps) {
               <circle cx="360" cy="326" r="7" fill="none" />
               <path d="M360 312v-8M360 340v8M346 326h-8M374 326h8" />
             </g>
-            <text x="376" y="314" fill={t.accent} fillOpacity="0.5" fontSize="5.2" fontFamily="'JetBrains Mono', monospace">
+            <text x="376" y="314" fill={t.accent} fillOpacity="0.7" fontSize="9" fontFamily="'JetBrains Mono', monospace">
               OPTICAL CENTRE Δ1.8°
             </text>
 
             <g stroke={t.ink} strokeOpacity="0.14">
               <path d="M44 740h-7M44 770h-7M262 810h7" />
             </g>
-            <text x="548" y="530" fill="#FFB547" fontSize="5.2" fontFamily="'JetBrains Mono', monospace">
+            <text x="548" y="532" fill="#FFB547" fontSize="9" fontFamily="'JetBrains Mono', monospace">
               G-01 · BREACH
             </text>
           </g>
@@ -433,8 +435,8 @@ function PosterArtifact({ heatmap, geometry, probes, theme }: PosterProps) {
                   x={probe.x + probe.dx}
                   y={probe.y + probe.dy}
                   fill={t.ink}
-                  fillOpacity="0.75"
-                  fontSize="5.6"
+                  fillOpacity="0.85"
+                  fontSize="9"
                   fontFamily="'JetBrains Mono', monospace"
                 >
                   {probe.id}
@@ -474,19 +476,19 @@ function PosterArtifact({ heatmap, geometry, probes, theme }: PosterProps) {
                   <rect
                     x={check.region.x}
                     y={check.region.y + 3}
-                    width={check.pass ? 62 : 78}
-                    height={10}
+                    width={check.pass ? 104 : 114}
+                    height={13}
                     fill={check.pass ? t.accent : '#FF5C5C'}
                     fillOpacity="0.92"
                   />
                   <text
                     x={check.region.x + 4}
-                    y={check.region.y + 10.5}
+                    y={check.region.y + 12.5}
                     fill={t.fieldBottom}
-                    fontSize="4.8"
+                    fontSize="9"
                     fontFamily="'JetBrains Mono', monospace"
                     fontWeight="600"
-                    letterSpacing="0.3"
+                    letterSpacing="0.2"
                   >
                     {check.id} · {check.ratio.toFixed(2)}:1 {check.pass ? 'PASS' : 'FAIL'}
                   </text>
@@ -500,6 +502,37 @@ function PosterArtifact({ heatmap, geometry, probes, theme }: PosterProps) {
   );
 }
 
+/**
+ * Static sandbox card. memo() with no props means React never re-renders it, so
+ * the MutationObserver's mutations are never overwritten by reconciliation.
+ */
+const RadarSandboxBody = memo(function RadarSandboxBody() {
+  return (
+    <>
+      <div className="dr-card-head">
+        <span>HELIOS · LIVE PREVIEW</span>
+        <span>SANDBOX / ISOLATED</span>
+      </div>
+      <div className="dr-banner" data-radar-surface="banner">
+        <strong>ORBITAL ENERGY — SERIES 07</strong>
+        <span>Continuous power at the edge of the map.</span>
+      </div>
+      <div className="dr-cta-row">
+        <div className="dr-cta" data-radar-surface="cta">
+          REQUEST MISSION BRIEF
+        </div>
+        <span className="dr-contract">
+          {BRAND_BASELINE_TOKEN} {BRAND_BASELINE_HEX}
+        </span>
+      </div>
+    </>
+  );
+});
+
+type RadarEvent = { id: number; text: string; tone: 'acid' | 'amber' | 'red' };
+
+const verdictTone = { PASS: 'acid', REVIEW: 'amber', FAIL: 'red' } as const;
+
 export function VisualForensics() {
   const { heatmap, setHeatmap, pushToast } = useStudio();
   const scenario = useScenario();
@@ -507,6 +540,12 @@ export function VisualForensics() {
   const [probes, setProbes] = useState(true);
   const [scanning, setScanning] = useState(false);
   const scanTimer = useRef<number | null>(null);
+
+  const sandboxRef = useRef<HTMLDivElement | null>(null);
+  const radarRef = useRef<DomRadar | null>(null);
+  const eventSeq = useRef(0);
+  const [reading, setReading] = useState<DriftReading | null>(null);
+  const [events, setEvents] = useState<RadarEvent[]>([]);
 
   const theme = scenario?.poster ?? DEFAULT_POSTER;
   const activePalette = paletteForScenario(scenario);
@@ -528,6 +567,41 @@ export function VisualForensics() {
     [],
   );
 
+  // Real MutationObserver bound to the sandboxed preview node.
+  useEffect(() => {
+    const root = sandboxRef.current;
+    if (!root) return;
+    const radar = createDomRadar(root, (next) => {
+      setReading(next);
+      eventSeq.current += 1;
+      const id = eventSeq.current;
+      const metric =
+        next.trigger === 'QUARANTINE'
+          ? `contract restored in ${next.detectMs.toFixed(2)}ms`
+          : next.kind === 'dom-node'
+            ? `caught in ${next.detectMs.toFixed(2)}ms · ${next.detail}`
+            : `caught in ${next.detectMs.toFixed(2)}ms · ΔE ${next.deltaE.toFixed(1)} · ${next.contrast.toFixed(2)}:1 ${next.wcagPass ? 'PASS' : 'FAIL'}`;
+      setEvents((current) =>
+        [{ id, text: `${next.trigger} · ${metric}`, tone: verdictTone[next.verdict] }, ...current].slice(0, 5),
+      );
+    });
+    radarRef.current = radar;
+    setReading(radar.measureNow());
+    return () => {
+      radar.disconnect();
+      radarRef.current = null;
+    };
+  }, []);
+
+  const quarantine = () => {
+    radarRef.current?.quarantine();
+    pushToast({
+      title: 'DOM quarantined · brand contract restored',
+      detail: 'Rogue nodes removed and inline overrides reverted surgically. No full re-render was needed.',
+      tone: 'clear',
+    });
+  };
+
   const rerunScan = () => {
     if (scanning) return;
     setScanning(true);
@@ -543,6 +617,8 @@ export function VisualForensics() {
       });
     }, 1800);
   };
+
+  const drifting = reading !== null && reading.verdict !== 'PASS';
 
   return (
     <div className="page page--visual">
@@ -804,6 +880,117 @@ export function VisualForensics() {
                 </span>
               </div>
             ))}
+          </div>
+        </Panel>
+      </div>
+
+      <div className="dr-wrap" data-tour="dom-radar">
+        <Panel className="dr-panel" bracket>
+          <PanelHead
+            kicker="Round 3 · Improvement 02"
+            title="Continuous DOM Drift Radar (Live MutationObserver)"
+            meta={`BASELINE ${BRAND_BASELINE_TOKEN} ${BRAND_BASELINE_HEX}`}
+            actions={
+              <span className="meta-live">
+                <StatusDot tone={drifting ? 'red' : 'acid'} pulse />
+                {drifting ? 'DRIFT DETECTED' : 'WATCHING'}
+              </span>
+            }
+          />
+
+          <div className="dr-body">
+            <div className="dr-stage">
+              <div className={`dr-sandbox ${drifting ? 'is-drifting' : ''}`} ref={sandboxRef}>
+                <RadarSandboxBody />
+              </div>
+              <div className="dr-presets">
+                {ROGUE_PRESETS.map((preset) => (
+                  <button
+                    type="button"
+                    className="tool-button"
+                    key={preset.id}
+                    title={preset.summary}
+                    onClick={() => radarRef.current?.inject(preset.id)}
+                  >
+                    {preset.id} · {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="dr-readout">
+              <div className="dr-actions">
+                <button
+                  type="button"
+                  className="btn btn-danger btn-small"
+                  onClick={() => radarRef.current?.inject('MUT-01')}
+                >
+                  Inject Rogue Color Drift
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger btn-small"
+                  onClick={() => radarRef.current?.inject('MUT-03')}
+                >
+                  Inject Unauthorized DOM Node
+                </button>
+                <button type="button" className="btn btn-primary btn-small" onClick={quarantine}>
+                  <ShieldCheck size={12} strokeWidth={2} />
+                  Auto-Quarantine & Revert DOM
+                </button>
+              </div>
+
+              <div className="dr-metrics">
+                <div className="dr-metric">
+                  <span>LIVE ΔE2000</span>
+                  <strong className={drifting ? 'text-red' : 'text-acid'}>
+                    {reading ? reading.deltaE.toFixed(1) : '—'}
+                  </strong>
+                  <em>vs {BRAND_BASELINE_HEX}</em>
+                </div>
+                <div className="dr-metric">
+                  <span>WCAG 2.2 CONTRAST</span>
+                  <strong className={reading && !reading.wcagPass ? 'text-red' : 'text-acid'}>
+                    {reading ? `${reading.contrast.toFixed(2)}:1` : '—'}
+                  </strong>
+                  <em>{reading ? (reading.wcagPass ? 'PASS ≥ 4.5' : 'FAIL < 4.5') : ''}</em>
+                </div>
+                <div className="dr-metric">
+                  <span>DETECTION</span>
+                  <strong>{reading && reading.detectMs > 0 ? `${reading.detectMs.toFixed(2)}ms` : '—'}</strong>
+                  <em>{reading && reading.detectMs > 0 ? (reading.detectMs < 4 ? 'UNDER 4ms' : 'OVER 4ms') : 'awaiting mutation'}</em>
+                </div>
+                <div className="dr-metric">
+                  <span>ROGUE NODES</span>
+                  <strong className={reading && reading.rogueNodes > 0 ? 'text-red' : ''}>
+                    {reading ? reading.rogueNodes : 0}
+                  </strong>
+                  <em>
+                    {reading ? (
+                      <Badge tone={verdictTone[reading.verdict]} dot>
+                        {reading.verdict}
+                      </Badge>
+                    ) : null}
+                  </em>
+                </div>
+              </div>
+
+              <div className="dr-log" aria-live="polite">
+                <div className="dr-log-head">
+                  <span>MUTATION LOG</span>
+                  <span>{reading?.detail ?? 'Within brand contract'}</span>
+                </div>
+                {events.length === 0 ? (
+                  <div className="dr-log-line is-muted">Observer attached · no mutations yet.</div>
+                ) : (
+                  events.map((event) => (
+                    <div className={`dr-log-line is-${event.tone}`} key={event.id}>
+                      {event.text}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
         </Panel>
       </div>
