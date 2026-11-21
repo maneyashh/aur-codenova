@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowRight, MousePointerClick, Sparkles } from 'lucide-react';
+import { ArrowRight, MousePointerClick, Sparkles, X } from 'lucide-react';
 import { useStudio } from '../state/studio';
 import { useSimulation } from './SimulationProvider';
 
@@ -295,6 +295,7 @@ export function TourLayer() {
 
           <div className="tour-card-foot">
             <button type="button" className="tour-skip" onClick={skipTour}>
+              <X size={11} strokeWidth={2.2} aria-hidden="true" />
               Skip tour
             </button>
             <button type="button" className="tour-cta" onClick={nextStep} disabled={scanning}>
