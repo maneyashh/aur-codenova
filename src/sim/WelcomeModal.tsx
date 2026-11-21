@@ -10,9 +10,12 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { AuraMark } from '../components/Logo';
-import { SCENARIO_LIST } from './scenarios';
+import { analyzePayload } from '../core/airlock';
+import { SCENARIO_LIST, SCENARIOS } from './scenarios';
 import { useSimulation } from './SimulationProvider';
 import type { Scenario, ScenarioId } from './types';
+
+const PRIVACY_ENTITY_COUNT = analyzePayload(SCENARIOS.privacy.airlockPayload).entities.length;
 
 function VisualPreview() {
   return (
@@ -103,7 +106,7 @@ function PrivacyPreview() {
       <g>
         <rect x="196" y="18" width="100" height="17" rx="3" fill="#C7A2FF" fillOpacity="0.12" stroke="#C7A2FF" strokeOpacity="0.35" />
         <text x="246" y="29" textAnchor="middle" fill="#DCC8FF" fontSize="4.6" fontFamily="'JetBrains Mono', monospace" letterSpacing="0.8">
-          14 ENTITIES DETECTED
+          {PRIVACY_ENTITY_COUNT} ENTITIES DETECTED
         </text>
       </g>
       <text x="24" y="80" fill="#8E7FA8" fontSize="5.2" fontFamily="'JetBrains Mono', monospace" letterSpacing="0.5">
@@ -237,7 +240,7 @@ function ScenarioCard({
 }
 
 export function WelcomeModal() {
-  const { gatewayOpen, selectScenario } = useSimulation();
+  const { gatewayOpen, selectScenario, enterFreeExplore } = useSimulation();
   const [focusIndex, setFocusIndex] = useState(0);
   const [launching, setLaunching] = useState<ScenarioId | null>(null);
   const launchTimer = useRef<number | null>(null);
@@ -272,9 +275,9 @@ export function WelcomeModal() {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        // The gateway is intentionally un-dismissible.
         event.preventDefault();
         event.stopPropagation();
+        enterFreeExplore();
         return;
       }
       if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
@@ -316,7 +319,7 @@ export function WelcomeModal() {
       window.removeEventListener('keydown', onKeyDown, true);
       document.body.style.overflow = previousOverflow;
     };
-  }, [gatewayOpen, launch]);
+  }, [gatewayOpen, launch, enterFreeExplore]);
 
   return (
     <AnimatePresence>
@@ -353,11 +356,11 @@ export function WelcomeModal() {
                 <span className="sim-gateway-brand">
                   <AuraMark size={26} />
                   <span className="sim-gateway-wordmark">AURA-GOV</span>
-                  <span className="sim-gateway-build">SIM / 2.0</span>
+                  <span className="sim-gateway-build">LOCAL / 3.0</span>
                 </span>
                 <span className="sim-gateway-mode">
                   <LockKeyhole size={11} strokeWidth={1.9} />
-                  JUDGE SIMULATION MODE
+                  SANDBOX MODE
                 </span>
               </div>
 
@@ -409,9 +412,13 @@ export function WelcomeModal() {
                 <span className="sim-gateway-live" />
                 DETERMINISTIC SANDBOX · NO UPLOAD REQUIRED
               </span>
+              <button type="button" className="sim-gateway-skip" onClick={enterFreeExplore}>
+                Explore without the tour
+                <ArrowRight size={12} strokeWidth={1.9} />
+              </button>
               <span className="sim-gateway-keys">
                 <span><kbd>1</kbd><kbd>2</kbd> select</span>
-                <span><kbd>↵</kbd> initialize</span>
+                <span><kbd>ESC</kbd> skip</span>
               </span>
             </footer>
           </motion.div>

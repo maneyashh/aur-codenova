@@ -164,9 +164,9 @@ Program: ORBITAL-7`,
     accent: '#C7A2FF',
     accentSoft: 'rgba(199, 162, 255, 0.16)',
     tags: [
-      { label: '14 PII entities', tone: 'red' },
+      { label: 'PII egress risk', tone: 'red' },
       { label: 'Fidelity 50.9', tone: 'amber' },
-      { label: '0 vault tokens', tone: 'red' },
+      { label: 'Vault policy armed', tone: 'blue' },
     ],
     asset: {
       id: 'PR-0011',
@@ -235,9 +235,11 @@ Secure drop: sk_live_4f9c2a7b8e1d6f3a9c0b
 Internal relay: 10.42.18.7
 Briefings at Meridian Park, Building 4.
 
+Personnel file: DOB 04/18/1981 · SSN 078-05-1120 · MRN-4481902 · card 4111 1111 1111 1111 · IBAN GB82WEST12345698765432.
+
 Program notes: Project HALCYON remains the primary vehicle for NIGHTGLASS and SOLARIS. Do not reference ORBITAL-7 cost basis.`,
     voiceVariant: 'llm',
-    publishOffset: 9,
+    publishOffset: 3,
   },
 };
 
@@ -288,9 +290,9 @@ export const TOUR_STEPS: TourStep[] = [
     id: 'arbiter',
     screen: 'command',
     target: 'arbiter',
-    eyebrow: 'STEP 02 / ROUND 3 · #1',
-    title: 'Autonomous Multi-Model Arbiter',
-    body: 'Any primary check under 0.85 confidence reroutes to a secondary AST/WASM engine — locally, zero external model calls. Press “Simulate <0.85 Edge Case” to watch it resolve.',
+    eyebrow: 'STEP 02 / ROUTING',
+    title: 'Autonomous Multi-Engine Arbiter',
+    body: 'Each lane reports a confidence derived from its real measurements. Anything under 0.85 reroutes to an independent symbolic cross-check — locally, with zero external model calls. Use “Simulate <0.85 Edge Case” to force the routing table.',
     cta: 'Next',
     doneCta: 'Next',
     placement: 'top',
@@ -299,9 +301,9 @@ export const TOUR_STEPS: TourStep[] = [
     id: 'dom-radar',
     screen: 'visual',
     target: 'dom-radar',
-    eyebrow: 'STEP 03 / ROUND 3 · #2',
+    eyebrow: 'STEP 03 / LIVE DEFENSE',
     title: 'Continuous DOM Drift Radar',
-    body: 'A live MutationObserver guards this sandbox. Inject a rogue mutation, watch live CIEDE2000 ΔE and WCAG contrast appear within milliseconds, then auto-quarantine.',
+    body: 'A live MutationObserver guards this sandbox. Inject a colour, DOM-node or geometry mutation and watch CIEDE2000, WCAG contrast and layout drift resolve in milliseconds. Auto-quarantine restores the contract.',
     cta: 'Next',
     doneCta: 'Next',
     placement: 'top',
@@ -310,9 +312,9 @@ export const TOUR_STEPS: TourStep[] = [
     id: 'vault',
     screen: 'airlock',
     target: 'vault',
-    eyebrow: 'STEP 04 / ROUND 3 · #3',
+    eyebrow: 'STEP 04 / TENANT POLICY',
     title: 'Enterprise Multi-Tenant Policy Vault',
-    body: 'Switch FinTech, HIPAA and Retail profiles to watch redaction, risk and egress change. Revoke all tokens, then verify the chained SHA-256 receipt ledger.',
+    body: 'Switch FinTech, HIPAA and Retail profiles to watch redaction, residual risk and egress change. Revoke tokens, re-issue fresh ones, or tamper with the persisted SHA-256 receipt chain to prove it is real.',
     cta: 'Next',
     doneCta: 'Next',
     placement: 'bottom',
@@ -323,9 +325,9 @@ export const TOUR_STEPS: TourStep[] = [
     target: 'remediate',
     eyebrow: 'STEP 05 / REMEDIATE',
     title: 'Surgical Voice DNA patch',
-    body: 'Apply a voice-preserving patch. Six token swaps, zero sentences regenerated, authorship intact.',
-    cta: 'Apply surgical patch',
-    doneCta: 'Apply surgical patch',
+    body: 'Apply a voice-preserving patch. Six token swaps, zero sentences regenerated, authorship intact. The LLM rewrite stays available as a counter-example.',
+    cta: 'Stage surgical patch',
+    doneCta: 'Stage surgical patch',
     placement: 'top',
   },
 ];

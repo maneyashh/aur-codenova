@@ -1,169 +1,175 @@
 # AURA-GOV
 
-**Autonomous Neuro-Symbolic Brand Compiler**
+**A deterministic brand-clearance compiler.**
 
-A forensic clearance studio for enterprise brand governance. AURA-GOV treats every asset — a poster, a headline, a launch claim, a paragraph of copy — as a *hypothesis* that must survive four independent audits before it is allowed to ship.
+AURA-GOV treats every asset — a poster, a headline, a launch claim, a paragraph of copy — as a hypothesis that must survive independent audits before it ships. Four domain engines produce measurements; one compiler turns those measurements into a single, reproducible clearance report.
 
-Deterministic where it must be. Neural where it helps. Never the other way around.
+Everything runs in the browser tab. No backend, no model call, no upload, no telemetry.
 
 ```
-                 ┌──────────────┐
-   raw asset ───▶│  ZERO-TRUST  │──▶ tokenised payload (no raw PII)
-                 │   AIRLOCK    │
-                 └──────┬───────┘
-                        │
-        ┌───────────────┼───────────────┐
-        ▼               ▼               ▼
-  ┌───────────┐   ┌───────────┐   ┌───────────┐
-  │  VISUAL   │   │ TEMPORAL  │   │   VOICE   │
-  │ FORENSICS │   │   TRUTH   │   │    DNA    │
-  │  ΔE · WCAG│   │ claims ×  │   │  lexical  │
-  │  geometry │   │  publish  │   │  patching │
-  └─────┬─────┘   └─────┬─────┘   └─────┬─────┘
-        └───────────────┼───────────────┘
-                        ▼
-                ┌──────────────┐
-                │  CLEARANCE   │  verdict · notes · evidence
-                │   VERDICT    │
-                └──────────────┘
+raw asset ──▶ ZERO-TRUST AIRLOCK ──▶ tokenized payload
+                    │
+      ┌─────────────┼─────────────┬─────────────┐
+      ▼             ▼             ▼             ▼
+  VISUAL         TEMPORAL       VOICE        ARBITER
+  CIEDE2000      claim expiry   fidelity     routing
+  WCAG 2.2       evidence       cadence      confidence
+  geometry       publish gate   lexical      fallbacks
+      └─────────────┼─────────────┴─────────────┘
+                    ▼
+            CLEARANCE COMPILER
+        score · verdict · trace hash
 ```
 
 ---
 
-## Why this exists
+## What this is — and what it is not
 
-Enterprise brand tooling has an epistemic problem. Generative models are excellent at producing *plausible* copy and *plausible* visuals, and terrible at telling you whether either is true. So teams bolt a "brand check" onto the end of the pipeline, run it through another model, and get a second opinion with the same failure mode.
+This project is deliberately honest about its boundaries. The goal is that every claim on screen can be traced to a function you can read.
 
-AURA-GOV inverts the architecture:
+| Claim | Reality |
+| --- | --- |
+| “Deterministic clearance” | Real. Pure TypeScript functions in `src/core`, no randomness in the scoring path. The same inputs produce the same score and SHA-256 trace hash. |
+| “Autonomous Multi-Engine Arbiter” | A deterministic **multi-engine ensemble** of four symbolic lanes (Voice, Visual, Airlock, Temporal), not four LLMs. Confidence is derived from each engine’s own measurements. **0 external LLM calls.** |
+| “Continuous Visual Regression & DOM Drift Radar” | A real `MutationObserver` watching a sandboxed specimen. It measures CIEDE2000 drift, WCAG contrast and layout geometry, coalesces mutation bursts, and can quarantine/revert. It is not a production site crawler. |
+| “Enterprise Multi-Tenant Policy Vault” | Real per-tenant policy, per-issuance random tokens, TTL expiry, RBAC and a SHA-256 chained ledger persisted in `localStorage`. It is not a KMS/HSM and does not encrypt at rest. |
+| “Neuro-symbolic” | The symbolic half is real and inspectable. There is no neural network in this build; the “LLM rewrite” is a fixed counter-example used to demonstrate why generative rewriting fails brand-voice preservation. |
+| “Zero network” | Real. Fonts are self-hosted, no analytics, no API calls. You can run the production build with the network disconnected. |
 
-- **Claims are contracts with expiry dates**, not sentences. A claim is evaluated against the *scheduled publish date*, not the moment it was written.
-- **Colour drift is arithmetic**, not vibes. CIEDE2000 and WCAG 2.2, implemented in the browser, auditable line by line.
-- **Compliance repair is lexical**, not creative. Patch the minimum token set; measure exactly how much authorship survived.
-- **PII never leaves the node.** Detection, tokenisation and the vault all happen locally. The external model receives placeholders.
-
-Every number on screen is computed from a deterministic function in `src/core`. Nothing is a screenshot of a backend you can't inspect.
-
----
-
-## The five modules
-
-### 01 · Command Deck
-The compiler's operating surface. A six-stage pipeline (Ingest → Airlock → Visual → Temporal → Voice → Clearance) with a live trace console, integrity stat cards, a clearance verdict panel with a weighted ring, a filterable verdict feed and a portfolio drift radar.
-
-- **Run compilation** replays the full audit: stages illuminate in sequence, the trace console streams timestamped log lines, the ring and verdict resolve, and a toast reports the outcome.
-- Verdict is *weighted*, not boolean: `CLEAR WITH NOTES · 91.4` means two open items that don't individually block shipment.
-
-### 02 · Visual Forensics
-A pixel-level interrogation of a rendered specimen (`Orbital Launch — Hero 07`).
-
-- **ΔE heatmap** — per-region CIEDE2000 drift against the master brand palette, painted onto the poster as a thermal overlay.
-- **Geometry lock** — logo clear-space, minimum size and aspect-ratio constraints checked against the G-01..G-04 ruleset.
-- **Probe mode** — hover-free forensic readout of sampled regions with hex, Lab, contrast ratio and WCAG level.
-- Toggleable overlays; the poster is a hand-built SVG so every measured region is addressable.
-
-### 03 · Temporal Truth
-The claim ledger, evaluated against a movable publication horizon.
-
-- **Time machine slider** — drag the scheduled publish date from T+00 to T+75 days. Every claim re-evaluates live.
-- **Claim ledger** — each claim shows its validity window, evidence status and a state badge: `VALID`, `EXPIRES ≤ 7D`, `EVIDENCE PENDING`, `CONTRADICTED`, `EXPIRED AT PUBLISH`.
-- **Evidence graph** — a per-claim node graph of verified / pending / contradicted sources, with the publish gate drawn as a vertical horizon.
-- The core insight: a claim that is true today can be **false on the day it ships**. The engine catches that.
-
-### 04 · Voice DNA
-Surgical compliance repair that preserves the author's fingerprint.
-
-- **Three-way diff** — `Author draft` vs `Surgical patch` vs `LLM rewrite`, rendered as highlighted prose.
-- **Token patch ledger** — six atomic substitutions, each with its rule (`ABS-01`, `UNV-04`, `TON-02`, `QNT-01`, `ABS-03`, `ABS-04`), rationale and confidence.
-- **Authorial fidelity** — a weighted score (sentence geometry 34%, cadence 22%, length 16%, punctuation 14%, lexical retention 14%) that *deliberately penalises* beautiful rewrites.
-- On the demo specimen the surgical patch scores **94.8** and the LLM rewrite **50.9**. Same compliance outcome, radically different authorship survival.
-
-### 05 · Zero-Trust Airlock
-The local sanitisation membrane between your asset and any external model.
-
-- **Live payload editor** — type or paste; eight entity classes (codename, program, person, email, phone, secret, IP, address) are detected in real time by lexicon + pattern rules and highlighted inline.
-- **Entity register** — every detected entity with its reversible vault token, detection rule and confidence.
-- **Egress manifest** — the exact payload the external model would receive, plus an **inbound/outbound flow diagram**.
-- **Leak simulation** — flip the toggle to bypass the airlock and watch the risk score, raw-character count and flow state turn hostile.
-- **Egress approval** — a one-way commit; the button becomes `Egress approved · tokens only` and the call counter increments.
+The numbers are computed, not screenshotted. The one place fixtures are used is the *content* being audited (poster theme, claim set, draft copy, payload); the judgement is always derived.
 
 ---
 
-## Judge Simulation Mode
+## The single source of truth
 
-A cold-start onboarding layer wraps the studio on first load. It is presentation-only: scenario content lives in `src/sim/scenarios.ts`, and every verdict is still recomputed by the same deterministic engines in `src/core` — the simulation never bypasses, mocks or modifies them.
+`src/core/compiler.ts` is the spine of the product. `buildClearanceReport(scenario, publishOffset)` derives, in one pass:
 
-**1 · The gateway.** An un-dismissible glass panel presents two staged incidents:
+- the airlock analysis and sanitized egress,
+- temporal evaluations at the scheduled publish date,
+- visual palette drift, WCAG checks and geometry checks,
+- voice fidelity metrics,
+- the weighted domain scores and overall verdict,
+- the six pipeline stages, six trace log lines, note list and radar axes,
+- the arbiter routing table,
+- a SHA-256 trace hash over the canonical report payload.
 
-| Dataset | Incident | What hydrates |
+Every screen consumes that report. There is no screen-local arithmetic that can drift out of sync, which is why the Command Deck, Visual, Temporal, Voice and Airlock views always agree.
+
+---
+
+## The eight engines
+
+| Module | Responsibility | Core exports |
 | --- | --- | --- |
-| **A** | Visual & Temporal Crisis | Off-brand magenta poster (`ORBIT30`, expired 31 Oct), campaign caption, verdict `74.8 HOLD`, visual/temporal findings, publish horizon `T+21` |
-| **B** | Privacy & Voice DNA Breach | Press release with 14 raw entities (people, phones, email, `sk_live_…`, internal IP, facility), verdict `81.3 BLOCK`, Airlock payload, Voice DNA default `LLM rewrite` |
+| `core/color.ts` | sRGB → CIELAB (D65), CIEDE2000 ΔE, WCAG 2.2 relative luminance and contrast | `deltaE2000`, `contrastRatio`, `wcagLevel`, `driftVerdict` |
+| `core/claims.ts` | Claim model, validity windows, evidence graph, publish-horizon evaluation | `evaluateClaim`, `addDays`, `daysBetween`, `claims` |
+| `core/voice.ts` | Tokenization, sentence geometry, cadence, weighted authorial fidelity | `computeVoiceMetrics`, `voiceFidelity`, `tokenPatches` |
+| `core/airlock.ts` | PII/regulated-identifier detection, Luhn validation, typed vault tokens, risk scoring | `analyzePayload`, `luhnValid`, `maskValue` |
+| `core/vault.ts` | Tenant policies, issuance, TTL, RBAC, SHA-256 receipt chain, persistence | `mintIssuance`, `applyTenantPolicy`, `appendReceipt`, `tamperLedger` |
+| `core/arbiter.ts` | Confidence routing across four lanes with symbolic fallbacks | `runArbiterPass`, `ARBITER_THRESHOLD` |
+| `core/domRadar.ts` | Live DOM mutation measurement, layout drift, quarantine | `createDomRadar`, `ROGUE_PRESETS` |
+| `core/compiler.ts` | Report derivation, scoring, trace hash, stage/log/note synthesis | `buildClearanceReport`, `buildBaselineReport` |
 
-Selecting a card instantly hydrates the Command Deck (asset, title, caption, verdict, notes), the Visual canvas (poster theme + recomputed ΔE palette), the Airlock ingress buffer, the Voice DNA variant and the publish horizon. Keyboard: `1`/`2` select, arrows move focus, `Enter` initialises. `Escape` is intentionally blocked.
-
-**2 · The tour.** A three-step spotlight walks the judge through the product:
-
-1. **Run** — highlights `Run compilation`; the step only advances after the six-stage pipeline actually seals.
-2. **Prove** — highlights the trace console: *"Math, not guesses… zero external models used."*
-3. **Remediate** — highlights the remediation strip and opens the surgical Voice DNA patch.
-
-The tooltip is a frosted, softly pulsing module positioned against a measured spotlight (`data-tour` anchors) with spring movement, collision-aware flipping and a floating fallback when the target is off screen.
-
-**3 · Architecture.** `SimulationProvider` (`src/sim/SimulationProvider.tsx`) is nested inside `StudioProvider`, so it can drive navigation, compilation, publish offset, heatmap and toasts without touching the core. Phase machine: `gateway → tour → free`. There is no persistence — every fresh load replays the judge flow. The topbar `DATASET A/B` chip and the command palette (`Switch crisis scenario`, `Restart judge tour`) re-enter it at any time.
-
----
-
-## Deterministic engines
-
-All four live in `src/core` and have zero framework dependencies. They are pure functions over plain data — portable to a worker, a CLI, or a server without modification.
-
-| File | Responsibility | Key exports |
-| --- | --- | --- |
-| `color.ts` | sRGB → CIELAB (D65), CIEDE2000 ΔE, WCAG 2.2 luminance & contrast | `deltaE2000`, `contrastRatio`, `wcagLevel`, `hexToRgb` |
-| `claims.ts` | Claim model, validity windows, publish-horizon evaluation | `evaluateClaim`, `addDays`, `daysBetween`, `claims` |
-| `voice.ts` | Tokenisation, cadence metrics, weighted authorial fidelity | `computeVoiceMetrics`, `voiceFidelity`, `tokenPatches` |
-| `airlock.ts` | Local PII/codename detection, reversible vault tokens, risk scoring | `analyzePayload`, `maskValue`, `entityTypeMeta` |
+All eight are framework-free TypeScript. They can run in a worker, a CLI or a server without modification.
 
 ### Colour science
-`hexToRgb → linearise → XYZ → Lab`, then the full Sharma et al. CIEDE2000 formulation (hue-angle handling, `S_L/S_C/S_H` weighting, `R_T` rotation term). Contrast uses WCAG relative luminance with the standard `(L1 + 0.05) / (L2 + 0.05)` ratio.
+
+`hexToRgb → linearise → XYZ → Lab`, then the full Sharma et al. CIEDE2000 formulation, including hue-angle handling, `S_L/S_C/S_H` weighting and the `R_T` rotation term. Contrast uses WCAG relative luminance with `(L1 + 0.05) / (L2 + 0.05)`.
+
+Verified against the published Sharma reference pairs (2.0425, 2.8615, 3.4412, 1.0000) and the canonical 21:1 black/white ratio.
 
 ### Temporal logic
-`evaluateClaim(claim, publishDate, today)` returns a state, severity and human-readable reason. Evaluation order is deliberate:
+
+`evaluateClaim(claim, publishDate)` returns a state, severity and reason. Evaluation order is deliberate:
 
 1. `publishDate > claim.expires` → **EXPIRED AT PUBLISH** (blocked)
-2. any `CONTRADICTED` evidence → **CONTRADICTED** (blocked)
-3. any `PENDING` evidence → **EVIDENCE PENDING** (watch)
+2. any contradicted evidence → **CONTRADICTED** (blocked)
+3. any pending evidence → **EVIDENCE PENDING** (watch)
 4. `expires − publishDate ≤ 7d` → **EXPIRES ≤ 7D** (watch)
 5. otherwise → **VALID** (clear)
 
+Operator quarantine/clear overrides are persisted in `localStorage` and applied on top of the deterministic result, with the override shown explicitly in the UI and export.
+
 ### Voice fidelity
-Sentence geometry and cadence dominate the weighting because they are what readers actually recognise as "the author". Lexical overlap is only 14% — swapping a word is cheap; rewriting a rhythm is not.
+
+Sentence geometry and cadence dominate the weighting because they are what readers recognise as authorship. Lexical overlap is only 14%. The surgical patch scores in the mid-90s; the LLM rewrite collapses — same compliance outcome, radically different authorship survival.
 
 ### Airlock detection
-Ordered regex passes for structured entities (email, IP, phone, secret-shaped strings, addresses) plus a curated lexicon for codenames and program names. Overlaps are resolved by span, then each hit is replaced with a typed vault token (`⟦CODENAME-01⟧`) and a reverse mapping is retained in memory for the session.
+
+Structured detectors for email, IP, phone, IBAN, payment card (with Luhn), SSN, date of birth, medical record number, secret-shaped strings and addresses, plus a curated lexicon for codenames and programme names. Overlaps are resolved by span; each hit becomes a typed token such as `[PERSON_01]` and the sanitized payload never contains the raw value.
 
 ---
 
-## Design system
+## Round 3: the three deep features
 
-A forensic instrument, not a dashboard. The reference points are Palantir Foundry's density and Linear's restraint — near-black surfaces, warm ivory type, and a single acid accent used only where the system is making a judgement.
+### 1 · Autonomous Multi-Engine Arbiter
 
-| Token | Value | Role |
+The Command Deck’s arbiter panel runs `runArbiterPass` over four lanes. Each lane’s confidence comes from real engine output:
+
+- **Voice** — fidelity score and buzzword count,
+- **Visual** — maximum ΔE and failing WCAG checks,
+- **Airlock** — entity count and residual risk,
+- **Temporal** — blocked claims and evidence state.
+
+Lanes at or above `0.85` resolve in place. Lanes below it reroute to an independent symbolic cross-check, with the exact route, fallback engine and reason rendered in the table. The final per-lane score is a **fusion**: the cross-check's confidence is discounted by how far it diverges from the uncertain primary, so a fallback can never inflate the number. The gauge shows the fused mean, and “Simulate < 0.85 edge case” depresses every primary so you can watch the fused confidence drop while the routing table escalates all four lanes.
+
+### 2 · Continuous Visual Regression & DOM Drift Radar
+
+The Visual Forensics screen mounts a real `MutationObserver` over a specimen node. Inject a colour, node-count or geometry mutation and the radar measures:
+
+- CIEDE2000 distance from the brand baseline,
+- WCAG contrast for the mutated text and an independent worst-contrast surface,
+- layout drift in pixels against a 2px tolerance,
+- mutation count and coalescing window.
+
+The verdict includes contrast failure, not just colour drift. Auto-quarantine holds the FAIL reading for 1.8s, restores the baseline and records the revert; turning it off lets you inspect the drift and revert manually. The four presets (`MUT-01` … `MUT-04`) are real DOM mutations, not animations.
+
+### 3 · Enterprise Multi-Tenant Policy Vault
+
+The Airlock screen hosts a local vault with three tenant profiles:
+
+| Tenant | Posture | What changes |
 | --- | --- | --- |
-| `--bg` | `#070908` | App background |
-| `--surface` | `#0b0e0c` | Panel surface |
-| `--text` | `#ecefe7` | Primary ivory |
-| `--acid` | `#d8ff4f` | Verdict / active / clearance |
-| `--amber` | `#ffb547` | Watch state |
-| `--red` | `#ff5c5c` | Block / leak / contradiction |
-| `--blue` | `#8ab4ff` | Evidence / neutral data |
-| `--teal`, `--violet`, `--rose` | — | Entity classes in the Airlock |
+| `TENANT-FINTECH` | Strict | Maximum redaction, short TTL, high residual-risk scrutiny |
+| `TENANT-HIPAA` | Clinical | PHI identifiers redacted, clinical egress policy |
+| `TENANT-RETAIL` | Pragmatic | Minimal necessary redaction, longer TTL |
 
-**Type:** Space Grotesk (display / numerals), Inter (body), JetBrains Mono (micro-labels, IDs, evidence). Micro-labels run as small as 5px with wide tracking — legible at 1× because they're uppercase mono, and they create the instrument-panel texture.
+Every issuance mints **new random token suffixes**, so token values are not predictable across runs. Tokens expire on a real TTL countdown. The RBAC segmented control gates issue/revoke/tamper/verify capabilities (`OPERATOR` vs `AUDITOR`). Every action appends a SHA-256 receipt linked to the previous hash; the ledger persists in `localStorage` under `aura-gov.vault.ledger.v2`. “Tamper” corrupts a receipt and “Verify” locates the first broken link. The audit trail exports as JSON.
 
-**Structure:** 12-column grid with `span-4/5/6/7/8/12` utilities, hairline `rgba` borders, a faint engineering grid on the app shell, bracketed panel corners on primary surfaces, and a sticky sidebar rail.
+---
 
-**Motion:** compilation stages illuminate sequentially, a scanline sweeps the Airlock editor, status dots pulse on live state, and the verdict ring animates from zero. No decorative animation that doesn't encode state.
+## Judge walkthrough
+
+The sandbox opens on a gateway with two staged incidents:
+
+| Dataset | Incident | What hydrates |
+| --- | --- | --- |
+| **A** | Visual & Temporal Crisis | Off-brand poster, expired promo claim, ΔE/WCAG/geometry findings, publish horizon `T+09` |
+| **B** | Privacy & Voice DNA Breach | Unredacted press release with regulated identifiers, LLM rewrite selected, publish horizon `T+03` |
+
+Selecting a dataset hydrates every screen through the compiler. The five-step guided walkthrough then:
+
+1. **Execute the six-stage deterministic scan** — the stage pipeline actually runs.
+2. **Autonomous Multi-Engine Arbiter** — inspect confidence and reroutes.
+3. **Continuous DOM Drift Radar** — inject a mutation, watch measurement and quarantine.
+4. **Enterprise Multi-Tenant Policy Vault** — switch tenants, re-issue, tamper, verify.
+5. **Surgical Voice DNA patch** — apply six lexical substitutions and seal remediation.
+
+You can skip the tour at any time (“Explore without the tour”) or restart it from the command palette. The simulation layer only drives navigation and fixtures; it never bypasses the engines.
+
+---
+
+## Screens
+
+**01 · Command Deck** — compiler operating surface: six-stage pipeline, live trace console, weighted clearance ring, verdict feed, portfolio drift radar, arbiter routing table. “Run compilation” replays the audit and produces the same trace hash for the same inputs.
+
+**02 · Visual Forensics** — hand-built SVG specimen with addressable regions. Palette drift, WCAG checks, geometry rules, probe readout, heatmap overlay, DOM drift radar, auto-quarantine, JSON export.
+
+**03 · Temporal Truth** — claim ledger against a movable publish horizon (`T+00` … `T+75`). Evidence graph, inspector, persisted quarantine/clear overrides, gate state, JSON ledger export.
+
+**04 · Voice DNA** — three-way diff (author draft / surgical patch / LLM rewrite), six-token patch ledger with rules and rationale, weighted fidelity gauge, commit state, JSON diff export.
+
+**05 · Zero-Trust Airlock** — live payload editor, entity register with rule and confidence, sanitized egress manifest, flow diagram, leak simulation, egress approval, multi-tenant vault, RBAC, TTL, SHA-256 receipt chain and audit export.
 
 ---
 
@@ -172,37 +178,74 @@ A forensic instrument, not a dashboard. The reference points are Palantir Foundr
 ```bash
 npm install
 npm run dev        # http://localhost:5173
-npm run build      # typecheck + production bundle
+npm run build      # tsc --noEmit && vite build
 npm run preview    # serve the production build
 npm run typecheck  # tsc --noEmit only
+npm test           # vitest run
 ```
 
-**Stack:** Vite 8 · React 19 · TypeScript 7 · lucide-react · motion (spring physics). No UI framework, no CSS-in-JS, no state library. Styling is hand-written CSS with custom properties; studio state is a single React context (`src/state/studio.tsx`) and the judge layer is a second, nested context (`src/sim/SimulationProvider.tsx`).
+**Stack:** Vite 8 · React 19 · TypeScript 7 · lucide-react · motion. No UI framework, no CSS-in-JS, no state library. Styling is hand-written CSS with custom properties; studio state is a React context, and the sandbox layer is a second, nested context.
 
-The demo is fully local-first — there is no backend, no network call, and no telemetry. Every verdict is computed in the browser at render time.
+**Fonts:** Inter, JetBrains Mono and Space Grotesk are self-hosted variable WOFF2 files in `public/fonts` (SIL OFL). There are no third-party requests at runtime.
+
+**Persistence:** only the vault ledger (`aura-gov.vault.ledger.v2`) and temporal overrides (`aura-gov.temporal.overrides.v1`) are stored locally. Clearing site data resets the demo.
 
 ---
 
-## Interactions worth trying
+## Tests and CI
+
+`npm test` runs 25 assertions against the real engines:
+
+- CIEDE2000 against Sharma reference pairs and drift thresholds,
+- WCAG contrast ratios and level assignment,
+- SHA-256 against FIPS 180-4 vectors and Node `crypto` across lengths and Unicode,
+- airlock detection of regulated identifiers, Luhn validation, sanitization and masking,
+- vault issuance uniqueness, tenant redaction, TTL expiry and receipt-chain tamper detection,
+- temporal expiry-before-publish behaviour,
+- compiler invariants: stage/log counts, cross-screen agreement, determinism, PII block verdict,
+- arbiter fusion: fallbacks never inflate confidence and stress mode lowers the fused mean.
+
+`.github/workflows/ci.yml` runs typecheck, tests and a production build on every push and pull request.
+
+### Runtime verification
+
+With `npm run preview -- --port 4173` serving the production build, three headless-Chrome scripts exercise the real UI:
+
+```bash
+npm run smoke  # all five screens at 1440 / 1024 / 768 / 390, overflow + console + network checks
+npm run tour   # the full five-step guided walkthrough, ending on the Voice patch
+npm run e2e    # 47 interactive assertions: dataset switch, arbiter stress, radar injection,
+               # quarantine, temporal override + reload persistence, voice commit + export,
+               # tenant/RBAC/TTL/tamper/verify/export, palette, deep links
+```
+
+The scripts use the locally installed Chrome via `puppeteer-core`; they are not part of CI because they need a browser binary.
+
+---
+
+## Interactions
 
 | Action | Where |
 | --- | --- |
-| `Ctrl/⌘ + K` | Global command palette — jump to any module or action |
-| Select Dataset A / B | Gateway — hydrate a full crisis scenario, then follow the tour |
-| `Run compilation` | Command Deck — replays the full six-stage audit |
-| `Switch crisis scenario` | Command palette — reopens the sandbox gateway |
-| `Restart judge tour` | Command palette — replays the three-step walkthrough |
-| Drag the publish horizon | Temporal Truth — watch claims expire *before* they ship |
-| Click any ledger row | Temporal Truth — retargets the evidence graph and inspector |
-| Switch to `LLM rewrite` | Voice DNA — fidelity collapses, warning banner appears |
-| `Authorize patch` | Voice DNA — commits the surgical diff |
-| Type in the payload editor | Airlock — entities are detected as you type |
-| `Preview leak` | Airlock — bypasses the membrane, turns the egress hostile |
-| `Approve sanitized egress` | Airlock — one-way commit, calls counter increments |
+| `Ctrl/⌘ + K` | Command palette — navigation, dataset switch, exports, tour restart |
+| `G 1` … `G 5` | Jump to a screen |
+| `Run compilation` | Command Deck — replay the six-stage audit |
+| Drag the publish horizon | Temporal Truth — watch claims expire before they ship |
+| Click a ledger row | Temporal Truth — retarget evidence graph and inspector |
+| `Quarantine claim` / `Clear for publish` | Temporal Truth — persisted override |
+| Switch to `LLM rewrite` | Voice DNA — fidelity collapses, warning appears |
+| `Authorize surgical patch` | Voice DNA — commit the diff |
+| Type in the payload editor | Airlock — entities detected as you type |
+| `Simulate leak` | Airlock — bypass the membrane, turn egress hostile |
+| Switch tenant / re-issue / tamper / verify | Airlock vault |
+| `Simulate < 0.85 edge case` | Command Deck arbiter |
+| Inject mutation / auto-quarantine | Visual Forensics radar |
 
-**Deep links:** every screen is addressable — `#/command`, `#/visual`, `#/temporal`, `#/voice`, `#/airlock`. State survives refresh; the back/forward buttons work.
+**Deep links:** `#/command`, `#/visual`, `#/temporal`, `#/voice`, `#/airlock`. A cold load honours the hash even after bypassing the gateway. Back/forward work; state survives refresh.
 
-**Responsive:** full rail ≥1200px → 76px icon rail ≤1200px → stacked panels ≤1000px → fixed bottom module bar ≤760px. Data tables collapse their least-critical columns ≤620px rather than scrolling horizontally. The evidence graph becomes horizontally pannable on phones.
+**Responsive:** full rail ≥1200px → icon rail ≤1200px → stacked panels ≤1000px → fixed bottom bar ≤760px. All data tables and controls are reflowed rather than horizontally scrolled, and the shell is verified for no horizontal overflow at 390px.
+
+**Accessibility:** every interactive control is a real button with a label, the command palette is keyboard-driven with a visible focus ring, status is never conveyed by colour alone (labels and icons accompany tone), and the type scale has a 9px floor for information-bearing micro-labels enforced in `src/styles/legibility.css`.
 
 ---
 
@@ -210,77 +253,32 @@ The demo is fully local-first — there is no backend, no network call, and no t
 
 ```
 src/
-├── App.tsx                  shell, keyboard handling, screen routing
-├── main.tsx                 mount
-├── components/
-│   ├── ui.tsx               Panel, Badge, Meter, Segmented, Toggle, StatCard, Sparkline…
-│   ├── Sidebar.tsx          brand block, module nav, operator card
-│   ├── Topbar.tsx           breadcrumb, search, UTC clock, system state
-│   ├── CommandPalette.tsx   Ctrl/⌘+K navigation + actions
-│   └── Logo.tsx             AURA mark
-├── core/                    deterministic engines (framework-free)
-│   ├── color.ts
-│   ├── claims.ts
-│   ├── voice.ts
-│   └── airlock.ts
-├── data/
-│   ├── brand.ts             palette, geometry rules, specimen regions
-│   └── overview.ts          pipeline stages, compile logs, feed, radar
-├── screens/                 the five modules
-│   ├── Overview.tsx
-│   ├── VisualForensics.tsx
-│   ├── TemporalTruth.tsx
-│   ├── VoiceDNA.tsx
-│   └── Airlock.tsx
-├── sim/                     judge simulation layer (presentation only)
-│   ├── SimulationProvider.tsx  gateway → tour → free state machine
-│   ├── scenarios.ts            Dataset A/B content + recomputed palettes
-│   ├── WelcomeModal.tsx        un-dismissible sandbox gateway
-│   ├── TourLayer.tsx           measured spotlight + floating tooltip
-│   ├── types.ts                scenario / tour types
-│   └── sim.css                 gateway, cards, tour, chip
-├── state/
-│   ├── studio.tsx           context: screen, hash routing, toasts, compile, publish offset
-│   └── navigation.ts        screen metadata
-└── styles/
-    ├── tokens.css           design tokens
-    ├── shell.css            app frame, sidebar, topbar, page grid
-    ├── ui.css               shared primitives
-    ├── screens.css          command deck
-    ├── visual.css           visual forensics
-    ├── temporal.css         temporal truth
-    ├── voice.css            voice dna
-    ├── airlock.css          zero-trust airlock
-    └── responsive.css       all breakpoints
+├── core/                 deterministic engines + compiler + tests
+│   ├── compiler.ts       single source of truth for every screen
+│   ├── color.ts          CIEDE2000 / WCAG
+│   ├── claims.ts         temporal engine
+│   ├── voice.ts          fidelity engine
+│   ├── airlock.ts        PII detection + sanitization
+│   ├── vault.ts          tenants, tokens, ledger, SHA-256
+│   ├── arbiter.ts        confidence routing
+│   ├── domRadar.ts       MutationObserver measurement
+│   └── __tests__/        vitest suite
+├── screens/              five operating surfaces
+├── components/           shell, UI primitives, palette
+├── sim/                  sandbox gateway, tour, scenarios
+├── state/                studio context, navigation
+├── styles/               hand-written CSS, tokens, responsive, legibility
+└── lib/                  download helpers
 ```
 
 ---
 
-## Design decisions
+## Known limits
 
-**Why no charting library?** Every visualisation here is bespoke — a ΔE heatmap over a poster, a claim-vs-time ruler, an evidence graph with a publish horizon, a cadence waveform. A charting library would have been more code to fight than to write.
+- No backend, database, authentication or multi-user sync. The vault and ledger are local to the browser profile.
+- The ledger is tamper-evident (chained hashes), not tamper-proof; a user with devtools can rewrite the whole chain. That is stated in the UI.
+- The DOM radar watches a sandboxed specimen, not arbitrary production pages.
+- The arbiter routes between symbolic engines; it does not call external models.
+- The claim set, poster, draft copy and payload are demo fixtures. The evaluation of them is real.
 
-**Why a pinned `TODAY`?** `TODAY = '2026-11-12'` makes the demo reproducible: the same claim states, the same ΔE values, the same fidelity scores on every machine, forever. Swap it for `new Date()` to make the engine live.
-
-**Why does the Airlock keep the raw text in memory?** Because the tokens are *reversible* — the point is that the model never sees the raw value, not that the operator can't. The vault is session-scoped and never serialised.
-
-**Why penalise the LLM rewrite so hard?** Because the failure mode is real. A rewrite can be more compliant and less yours. The fidelity score is designed to make that trade-off visible instead of hiding it behind "brand-safe".
-
----
-
-## Roadmap
-
-- **Real asset ingestion** — image upload → canvas sampling → automatic region segmentation, replacing the hand-authored specimen regions.
-- **Evidence connectors** — pull claim evidence from internal ledgers and research APIs, with signed timestamps.
-- **Server-side vault** — move the Airlock vault to a KMS-backed session store so tokens can be re-hydrated across devices.
-- **Rule authoring** — let governance teams define geometry, tone and claim rules as data, not code.
-- **Audit export** — signed, timestamped clearance receipts (PDF + JSON) suitable for regulatory review.
-- **Diff-aware recompilation** — only re-run stages whose inputs changed.
-
----
-
-## Status
-
-Foundation build. All five modules are functional, fully responsive, keyboard-navigable, and type-clean. The judge simulation layer adds an un-dismissible scenario gateway and a three-step guided tour. `npm run build` passes; no runtime errors in Chrome.
-
-Not yet implemented: persistence, authentication, real model calls, and asset upload. The Airlock's external model is represented by the egress manifest rather than an actual request — by design, for a local-first demo.
+These boundaries are deliberate. The interesting claim is not “we built everything”; it is “every number you see is computed by code you can audit”.

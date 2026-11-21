@@ -10,12 +10,14 @@ import {
   LockKeyhole,
   ShieldAlert,
   ShieldCheck,
+  Timer,
 } from 'lucide-react';
 import {
   Badge,
   Panel,
   PanelHead,
   ScreenHead,
+  Segmented,
   StatusDot,
   Toggle,
 } from '../components/ui';
@@ -30,16 +32,26 @@ import {
   type EntityType,
 } from '../core/airlock';
 import {
+  EXPIRED_TOKEN,
   REVOKED_TOKEN,
   TENANTS,
   TENANT_ORDER,
   appendReceipt,
   applyTenantPolicy,
+  can,
   findLedgerBreak,
+  loadLedger,
+  mintIssuance,
+  resetLedger,
+  saveLedger,
+  sha256Hex,
   shortHash,
+  tamperLedger,
   type LedgerEntry,
   type TenantId,
+  type VaultRole,
 } from '../core/vault';
+import { downloadJson } from '../lib/download';
 
 function EntityHighlights({ report }: { report: AirlockReport }) {
   return (
@@ -62,8 +74,8 @@ function EntityHighlights({ report }: { report: AirlockReport }) {
   );
 }
 
-const TOKEN_SPLIT = /(\[[A-Z_]+\d*\])/g;
-const TOKEN_TEST = /^\[[A-Z_]+\d*\]$/;
+const TOKEN_SPLIT = /(\[[A-Z][A-Z0-9_-]*\])/g;
+const TOKEN_TEST = /^\[[A-Z][A-Z0-9_-]*\]$/;
 
 function EgressPayload({ sanitized }: { sanitized: string }) {
   const parts = sanitized.split(TOKEN_SPLIT);
@@ -72,7 +84,13 @@ function EgressPayload({ sanitized }: { sanitized: string }) {
       {parts.map((part, index) =>
         TOKEN_TEST.test(part) ? (
           <mark
-            className={`token-vault ${part === REVOKED_TOKEN ? 'token-vault--revoked' : ''}`}
+            className={`token-vault ${
+              part === REVOKED_TOKEN
+                ? 'token-vault--revoked'
+                : part === EXPIRED_TOKEN
+                  ? 'token-vault--revoked'
+                  : ''
+            }`}
             key={`${part}-${index}`}
           >
             {part}
@@ -88,6 +106,19 @@ function EgressPayload({ sanitized }: { sanitized: string }) {
 const CODENAME_TYPES: EntityType[] = ['CODENAME', 'PROGRAM'];
 const PERSONAL_TYPES: EntityType[] = ['PERSON', 'EMAIL', 'PHONE', 'ADDRESS'];
 const CREDENTIAL_TYPES: EntityType[] = ['SECRET', 'IP'];
+const REGULATED_TYPES: EntityType[] = ['SSN', 'DOB', 'MRN', 'CARD', 'IBAN'];
+
+const ROLE_OPTIONS: { value: VaultRole; label: string }[] = [
+  { value: 'OPERATOR', label: 'Operator' },
+  { value: 'AUDITOR', label: 'Auditor' },
+];
+
+function formatTtl(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
 
 export function Airlock() {
   const { pushToast } = useStudio();
@@ -100,33 +131,66 @@ export function Airlock() {
   const [approved, setApproved] = useState(false);
   const [externalCalls, setExternalCalls] = useState(0);
   const [tenantId, setTenantId] = useState<TenantId>('TENANT-FINTECH');
-  const [revoked, setRevoked] = useState(false);
-  const [ledger, setLedger] = useState<LedgerEntry[]>(() =>
-    appendReceipt([], 'TENANT-FINTECH', 'VAULT_INIT', 0),
-  );
+  const [role, setRole] = useState<VaultRole>('OPERATOR');
+  const [ledger, setLedger] = useState<LedgerEntry[]>(() => loadLedger());
+  const [tick, setTick] = useState(() => Date.now());
   const highlightRef = useRef<HTMLPreElement>(null);
-
-  // Hydrate the ingress buffer whenever a new crisis dataset is selected.
-  useEffect(() => {
-    setPayload(scenario?.airlockPayload ?? AIRLOCK_SAMPLE);
-    setApproved(false);
-    setPreviewRaw(false);
-    setReveal(false);
-    setRevoked(false);
-    setExternalCalls(0);
-  }, [scenario?.id, scenario?.airlockPayload]);
+  // Last known-good chain, captured before a deliberate tamper so the demo can
+  // restore history instead of discarding it.
+  const intactSnapshot = useRef<LedgerEntry[] | null>(null);
 
   const report = useMemo(() => analyzePayload(payload), [payload]);
-  const view = useMemo(() => applyTenantPolicy(report, tenantId, revoked), [report, tenantId, revoked]);
+  const [issuance, setIssuance] = useState(() => mintIssuance(report, 'TENANT-FINTECH'));
+
+  // A new payload or tenant profile issues a fresh token set — tokens are never
+  // silently reused across policies.
+  useEffect(() => {
+    setIssuance(mintIssuance(report, tenantId));
+    setApproved(false);
+    setTick(Date.now());
+  }, [report, tenantId]);
+
+  // Live TTL countdown: the vault genuinely expires tokens when the clock passes
+  // the issuance deadline, and the UI re-renders each second.
+  useEffect(() => {
+    const timer = window.setInterval(() => setTick(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  // Persist the chained ledger across reloads.
+  useEffect(() => {
+    saveLedger(ledger);
+  }, [ledger]);
+
+  const view = useMemo(
+    () => applyTenantPolicy(report, tenantId, issuance, tick),
+    [report, tenantId, issuance, tick],
+  );
   const chainBreak = useMemo(() => findLedgerBreak(ledger), [ledger]);
   const chainIntact = chainBreak === -1;
   const leaking = !armed || previewRaw;
   const uniqueTypes = Array.from(new Set(report.entities.map((entity) => entity.type)));
   const profile = view.profile;
   const head = ledger[ledger.length - 1];
+  const locked = view.blocked;
+  const canOperate = can(role, 'REVOKE');
+  const canApprove = can(role, 'APPROVE_EGRESS');
+  const canTamper = can(role, 'TAMPER_TEST');
 
-  const handlePayloadChange = (value: string) => {
-    setPayload(value);
+  const appendEntry = (action: string, count = view.redactedCount) => {
+    setLedger((current) =>
+      appendReceipt(current, {
+        tenantId,
+        action,
+        entityCount: count,
+        payloadHash: sha256Hex(payload),
+        role,
+      }),
+    );
+  };
+
+  const hydratePayload = (next: string) => {
+    setPayload(next);
     setApproved(false);
   };
 
@@ -150,24 +214,30 @@ export function Airlock() {
 
   const selectTenant = (id: TenantId) => {
     if (id === tenantId) return;
-    const next = applyTenantPolicy(report, id, revoked);
+    const next = applyTenantPolicy(report, id, issuance, Date.now());
     setTenantId(id);
     setApproved(false);
-    setLedger((current) => appendReceipt(current, id, 'POLICY_SWITCH', next.redactedCount));
+    appendEntry('POLICY_SWITCH', next.redactedCount);
     pushToast({
       title: `${TENANTS[id].name} policy active`,
-      detail: `${next.redactedCount} of ${report.entities.length} entities vaulted · ${next.passthroughCount} pass under this tenant's policy · risk ${next.risk}.`,
+      detail: `${next.redactedCount} of ${report.entities.length} entities vaulted · ${next.passthroughCount} pass under this tenant's policy · residual risk ${next.residualRisk}.`,
       tone: 'clear',
     });
   };
 
   const toggleRevoke = () => {
-    const next = !revoked;
-    setRevoked(next);
+    if (!canOperate) {
+      pushToast({
+        title: 'Auditor role is read-only',
+        detail: 'Switch to Operator to revoke or re-issue vault tokens.',
+        tone: 'block',
+      });
+      return;
+    }
+    const next = !issuance.revoked;
+    setIssuance((current) => ({ ...current, revoked: next }));
     setApproved(false);
-    setLedger((current) =>
-      appendReceipt(current, tenantId, next ? 'TOKENS_REVOKED' : 'TOKENS_REISSUED', view.redactedCount),
-    );
+    appendEntry(next ? 'TOKENS_REVOKED' : 'TOKENS_REISSUED');
     pushToast(
       next
         ? {
@@ -177,16 +247,26 @@ export function Airlock() {
           }
         : {
             title: 'Vault tokens re-issued',
-            detail: `Fresh ${profile.tokenTtlMin}-minute tokens minted under ${profile.id}.`,
+            detail: `Fresh ${profile.tokenTtlMin}-minute tokens minted under ${profile.id} with new random suffixes.`,
             tone: 'clear',
           },
     );
   };
 
+  const reissueTokens = () => {
+    if (!canOperate) return;
+    setIssuance(mintIssuance(report, tenantId));
+    setApproved(false);
+    appendEntry('TOKENS_REISSUED');
+    pushToast({
+      title: 'Fresh token set minted',
+      detail: `${view.redactedCount} tokens re-issued · TTL reset to ${profile.tokenTtlMin} minutes · new random suffixes.`,
+      tone: 'clear',
+    });
+  };
+
   const verifyChain = () => {
-    const probe = ledger.map((entry, index) =>
-      index === 0 ? { ...entry, entityCount: entry.entityCount + 1 } : entry,
-    );
+    const probe = tamperLedger(ledger, 0);
     const probeBreak = findLedgerBreak(probe);
     pushToast(
       chainIntact
@@ -197,20 +277,102 @@ export function Airlock() {
           }
         : {
             title: `Receipt chain broken at #${String(chainBreak).padStart(2, '0')}`,
-            detail: 'A receipt no longer matches its recomputed SHA-256 link.',
+            detail: 'A receipt no longer matches its recomputed SHA-256 link. The ledger is no longer trustworthy.',
             tone: 'block',
           },
     );
   };
 
+  const tamperTest = () => {
+    if (!canTamper) return;
+    if (chainBreak !== -1) {
+      const snapshot = intactSnapshot.current;
+      const restored = snapshot ? [...snapshot] : resetLedger();
+      intactSnapshot.current = null;
+      setLedger(restored);
+      pushToast({
+        title: snapshot ? 'Chain restored from the last signed state' : 'Ledger restored to genesis',
+        detail: snapshot
+          ? `${restored.length} receipts recovered. The mutated receipt was replaced with its original bytes.`
+          : 'Fresh chain created. Previous receipts were discarded.',
+        tone: 'info',
+      });
+      return;
+    }
+    // Capture the intact chain before mutating so the demo can prove both
+    // detection and recovery without losing the audit history.
+    intactSnapshot.current = ledger;
+    setLedger((current) => tamperLedger(current, current.length - 1));
+    pushToast({
+      title: 'Receipt tampered · chain should now fail',
+      detail: 'The last receipt was mutated. Press Verify to watch SHA-256 recomputation catch it.',
+      tone: 'block',
+    });
+  };
+
   const approveEgress = () => {
-    if (leaking || approved || revoked) return;
+    if (leaking || approved || locked) return;
+    if (!canApprove) {
+      pushToast({
+        title: 'Auditor role cannot approve egress',
+        detail: 'Switch to Operator to sign the sanitized egress manifest.',
+        tone: 'block',
+      });
+      return;
+    }
     setApproved(true);
     setExternalCalls(1);
-    setLedger((current) => appendReceipt(current, tenantId, 'EGRESS_APPROVED', view.redactedCount));
+    appendEntry('EGRESS_APPROVED');
     pushToast({
       title: 'Sanitized egress approved',
       detail: `${view.redactedCount} vault tokens released · ${view.passthroughCount} allow-listed · response rehydration gated locally.`,
+      tone: 'clear',
+    });
+  };
+
+  const exportAuditTrail = () => {
+    downloadJson(`aura-vault-audit-${tenantId.toLowerCase()}.json`, {
+      schema: 'aura-gov/vault-audit/v2',
+      exportedAt: new Date().toISOString(),
+      tenant: {
+        id: profile.id,
+        name: profile.name,
+        framework: profile.framework,
+        ttlMinutes: profile.tokenTtlMin,
+        egressLock: profile.egressLock,
+      },
+      actor: { role, operator: 'A. KAUR' },
+      issuance: {
+        id: issuance.id,
+        issuedAt: new Date(issuance.issuedAt).toISOString(),
+        expiresAt: new Date(view.expiresAt).toISOString(),
+        revoked: issuance.revoked,
+        expired: view.expired,
+      },
+      payload: {
+        characters: payload.length,
+        entities: report.entities.map((entity) => ({
+          id: entity.id,
+          type: entity.type,
+          rule: entity.rule,
+          confidence: entity.confidence,
+          valueHash: sha256Hex(entity.raw),
+        })),
+        redactedCount: view.redactedCount,
+        passthroughCount: view.passthroughCount,
+        riskIntercepted: view.risk,
+        residualRisk: view.residualRisk,
+      },
+      ledger: {
+        receipts: ledger,
+        chainIntact,
+        brokenAt: chainBreak,
+        head: head.hash,
+      },
+    });
+    pushToast({
+      title: 'Vault audit trail downloaded',
+      detail: `${ledger.length} chained receipts · ${view.redactedCount} redactions · raw values hashed, never exported.`,
       tone: 'clear',
     });
   };
@@ -239,10 +401,16 @@ export function Airlock() {
     if (leaking) return 'EXPOSED';
     const rows = view.rows.filter((row) => types.includes(row.entity.type));
     if (rows.length === 0) return 'NONE DETECTED';
-    if (rows.every((row) => row.redacted)) return revoked ? 'REVOKED' : vaulted;
+    if (rows.every((row) => row.redacted)) return locked ? 'REVOKED' : vaulted;
     if (rows.every((row) => !row.redacted)) return 'POLICY PASS';
     return 'PARTIAL';
   };
+
+  const ttlLabel = locked
+    ? view.expired
+      ? 'TTL EXPIRED'
+      : 'TOKENS REVOKED'
+    : `TTL ${formatTtl(view.remainingMs)}`;
 
   return (
     <div className="page page--airlock">
@@ -254,10 +422,11 @@ export function Airlock() {
             Nothing leaves without <span className="title-accent">a clearance.</span>
           </>
         }
-        description="A zero-trust preprocessing airlock. Codenames, people, facilities, secrets and network identifiers are tokenized locally — before any external model can see the prompt."
+        description="A zero-trust preprocessing airlock. Codenames, people, facilities, secrets, network identifiers and regulated data (SSN, DOB, MRN, card, IBAN) are tokenized locally — before any external model can see the prompt."
         badge={
           <span className="head-live">
-            <StatusDot tone="acid" pulse /> 0 EXTERNAL CALLS
+            <StatusDot tone={externalCalls > 0 ? 'amber' : 'acid'} pulse />
+            {externalCalls > 0 ? `${externalCalls} EXTERNAL CALL` : '0 EXTERNAL CALLS'}
           </span>
         }
         actions={
@@ -266,17 +435,7 @@ export function Airlock() {
               <LockKeyhole size={13} strokeWidth={1.7} />
               LOCAL INFERENCE ONLY
             </span>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() =>
-                pushToast({
-                  title: 'Airlock audit trace exported',
-                  detail: `${view.redactedCount} redactions · ${view.protectedCharacters} protected characters · no network egress recorded.`,
-                  tone: 'clear',
-                })
-              }
-            >
+            <button type="button" className="btn btn-ghost" onClick={exportAuditTrail}>
               <Download size={14} strokeWidth={1.7} />
               Audit trail
             </button>
@@ -287,21 +446,43 @@ export function Airlock() {
       <div className="vault-bar" data-tour="vault">
         <div className="vault-bar-head">
           <div className="vault-bar-title">
-            <span className="vault-kicker">Round 3 · Improvement 03</span>
+            <span className="vault-kicker">Multi-tenant policy layer</span>
             <h2>Enterprise Multi-Tenant Policy Vault</h2>
           </div>
           <div className="vault-bar-actions">
-            <span className={`vault-state ${revoked ? 'is-revoked' : ''}`}>
-              <StatusDot tone={revoked ? 'red' : 'acid'} pulse={!revoked} />
-              {revoked ? 'TOKENS REVOKED' : `${view.redactedCount} TOKENS ACTIVE · TTL ${profile.tokenTtlMin}m`}
+            <span className="vault-role">
+              <span className="vault-role-label">ACTING AS</span>
+              <Segmented
+                value={role}
+                onChange={(next) => {
+                  setRole(next);
+                  pushToast({
+                    title: `Acting as ${next.toLowerCase()}`,
+                    detail:
+                      next === 'AUDITOR'
+                        ? 'Read-only: revoke, re-issue and egress approval are disabled.'
+                        : 'Full vault control: revoke, re-issue and approve sanitized egress.',
+                    tone: 'info',
+                  });
+                }}
+                ariaLabel="Vault role"
+                size="sm"
+                options={ROLE_OPTIONS}
+              />
+            </span>
+            <span className={`vault-state ${locked ? 'is-revoked' : ''}`}>
+              <StatusDot tone={locked ? 'red' : 'acid'} pulse={!locked} />
+              {view.redactedCount} TOKENS · {ttlLabel}
             </span>
             <button
               type="button"
-              className={`btn btn-small ${revoked ? 'btn-ghost' : 'btn-danger'}`}
-              onClick={toggleRevoke}
+              className={`btn btn-small ${locked ? 'btn-ghost' : 'btn-danger'}`}
+              onClick={locked ? reissueTokens : toggleRevoke}
+              disabled={!canOperate}
+              title={!canOperate ? 'Auditor role is read-only' : undefined}
             >
               <ShieldAlert size={12} strokeWidth={1.9} />
-              {revoked ? 'Re-issue Vault Tokens' : 'Revoke Vault Tokens'}
+              {locked ? 'Re-issue fresh tokens' : 'Revoke tokens'}
             </button>
           </div>
         </div>
@@ -337,7 +518,7 @@ export function Airlock() {
           </span>
           <span className="vault-chain" aria-label="Most recent receipt hashes">
             {ledger.slice(-4).map((entry, index, recent) => (
-              <span className="vault-hash" key={entry.hash} title={`${entry.action} · ${entry.hash}`}>
+              <span className="vault-hash" key={`${entry.seq}-${entry.hash}`} title={`${entry.action} · ${entry.hash}`}>
                 {shortHash(entry.hash)}
                 {index < recent.length - 1 ? <i>→</i> : null}
               </span>
@@ -346,7 +527,17 @@ export function Airlock() {
           <span className="vault-head-hash">HEAD {shortHash(head.hash)}</span>
           <button type="button" className="btn btn-ghost btn-small" onClick={verifyChain}>
             <CheckCircle2 size={12} strokeWidth={1.9} />
-            Verify SHA-256 Receipt Chain ({chainIntact ? '100% Intact' : 'BROKEN'})
+            Verify chain ({chainIntact ? 'intact' : 'broken'})
+          </button>
+          <button
+            type="button"
+            className={`btn btn-ghost btn-small ${chainIntact ? '' : 'is-tampered'}`}
+            onClick={tamperTest}
+            disabled={!canTamper}
+            title="Mutate the last receipt to prove SHA-256 tamper detection is real"
+          >
+            <Timer size={12} strokeWidth={1.9} />
+            {chainIntact ? 'Tamper test' : 'Reset ledger'}
           </button>
         </div>
       </div>
@@ -379,8 +570,7 @@ export function Airlock() {
                   type="button"
                   className="tool-button"
                   onClick={() => {
-                    setPayload(scenario?.airlockPayload ?? AIRLOCK_SAMPLE);
-                    setApproved(false);
+                    hydratePayload(scenario?.airlockPayload ?? AIRLOCK_SAMPLE);
                     setPreviewRaw(false);
                     setReveal(false);
                     setExternalCalls(0);
@@ -403,7 +593,7 @@ export function Airlock() {
               <textarea
                 className="payload-input"
                 value={payload}
-                onChange={(event) => handlePayloadChange(event.target.value)}
+                onChange={(event) => hydratePayload(event.target.value)}
                 onScroll={(event) => {
                   if (!highlightRef.current) return;
                   highlightRef.current.scrollTop = event.currentTarget.scrollTop;
@@ -425,7 +615,7 @@ export function Airlock() {
                 <strong>{view.protectedCharacters}<small> CHAR</small></strong>
               </div>
               <div className="ingress-metric">
-                <span>RISK INTERCEPTED</span>
+                <span>SENSITIVITY INTERCEPTED</span>
                 <strong className="text-amber">{view.risk}<small> / 99</small></strong>
               </div>
               <div className="ingress-types">
@@ -446,7 +636,7 @@ export function Airlock() {
 
             <div className="ingress-foot">
               <span><LockKeyhole size={11} strokeWidth={1.7} /> PROCESSED ON NODE S-01 · NOTHING QUEUED FOR EGRESS</span>
-              <span>{uniqueTypes.length} CLASSES / LEXICON v9</span>
+              <span>{uniqueTypes.length} CLASSES / {report.ruleCount} RULES</span>
             </div>
           </Panel>
 
@@ -485,7 +675,7 @@ export function Airlock() {
                   </span>
                   <span
                     className={`entity-token ${
-                      !row.redacted ? 'is-pass' : revoked ? 'is-revoked' : ''
+                      !row.redacted ? 'is-pass' : locked ? 'is-revoked' : ''
                     }`}
                   >
                     {row.redacted ? row.token : row.allowListed ? 'ALLOW-LISTED' : 'POLICY PASS'}
@@ -504,7 +694,7 @@ export function Airlock() {
             </div>
             <div className="entity-foot">
               <span>{reveal ? 'RAW VALUES VISIBLE ON LOCAL NODE ONLY' : 'VALUES MASKED · REVEAL IS LOCAL-ONLY'}</span>
-              <span>LEXICON v9 + 4 REGEX PATTERNS · {profile.id}</span>
+              <span>{report.ruleCount} DETECTION RULES · {profile.id}</span>
             </div>
           </Panel>
         </div>
@@ -515,8 +705,8 @@ export function Airlock() {
             title="External payload"
             meta="TARGET / SANDBOX MODEL"
             actions={
-              <Badge tone={leaking ? 'red' : revoked ? 'amber' : 'acid'} dot>
-                {leaking ? 'LEAK' : revoked ? 'REVOKED' : 'SANITIZED'}
+              <Badge tone={leaking ? 'red' : locked ? 'amber' : 'acid'} dot>
+                {leaking ? 'LEAK' : locked ? (view.expired ? 'EXPIRED' : 'REVOKED') : 'SANITIZED'}
               </Badge>
             }
           />
@@ -532,7 +722,7 @@ export function Airlock() {
               {leaking ? <ShieldAlert size={15} strokeWidth={1.7} /> : <ShieldCheck size={15} strokeWidth={1.7} />}
               <strong>AIRLOCK</strong>
               <span className="flow-node-meta">
-                {leaking ? 'bypassed' : revoked ? 'revoked' : `${view.redactedCount} tokens`}
+                {leaking ? 'bypassed' : locked ? 'tokens dead' : `${view.redactedCount} tokens`}
               </span>
             </div>
             <span className="flow-link">····</span>
@@ -599,8 +789,8 @@ export function Airlock() {
               <strong>{leaking ? report.protectedCharacters : '00'}</strong>
             </div>
             <div>
-              <span>RISK SCORE</span>
-              <strong className={leaking ? 'text-red' : 'text-amber'}>{view.risk}</strong>
+              <span>RESIDUAL RISK</span>
+              <strong className={view.residualRisk > 0 ? 'text-amber' : 'text-acid'}>{view.residualRisk}</strong>
             </div>
             <div>
               <span>EXTERNAL CALLS</span>
@@ -626,6 +816,11 @@ export function Airlock() {
             </div>
             <div className="egress-policy-row">
               <LockKeyhole size={11} />
+              <span>Regulated identifiers</span>
+              <strong>{groupState(REGULATED_TYPES, 'VAULTED')}</strong>
+            </div>
+            <div className="egress-policy-row">
+              <LockKeyhole size={11} />
               <span>Response rehydration</span>
               <strong>LOCAL ONLY</strong>
             </div>
@@ -635,11 +830,11 @@ export function Airlock() {
             type="button"
             className={`btn btn-full ${approved ? 'btn-committed' : leaking ? 'btn-danger' : 'btn-primary'}`}
             onClick={approveEgress}
-            disabled={approved || leaking || revoked}
+            disabled={approved || leaking || locked || !canApprove}
           >
             {approved ? (
               <Check size={14} strokeWidth={2.4} />
-            ) : leaking || revoked ? (
+            ) : leaking || locked ? (
               <ShieldAlert size={14} />
             ) : (
               <ShieldCheck size={14} strokeWidth={1.8} />
@@ -648,10 +843,16 @@ export function Airlock() {
               ? 'Egress approved · tokens only'
               : leaking
                 ? 'Seal airlock before egress'
-                : revoked
-                  ? 'Tokens revoked · re-issue to egress'
-                  : 'Approve sanitized egress'}
-            {!approved && !leaking && !revoked ? <ArrowRight size={12} className="btn-tail" /> : null}
+                : locked
+                  ? view.expired
+                    ? 'Tokens expired · re-issue to egress'
+                    : 'Tokens revoked · re-issue to egress'
+                  : !canApprove
+                    ? 'Auditor cannot approve egress'
+                    : 'Approve sanitized egress'}
+            {!approved && !leaking && !locked && canApprove ? (
+              <ArrowRight size={12} className="btn-tail" />
+            ) : null}
           </button>
 
           <div className="egress-foot">
@@ -664,7 +865,7 @@ export function Airlock() {
       <div className="airlock-audit-strip">
         <div className="audit-item">
           <span className="audit-label">LOCAL PREPROCESSOR</span>
-          <span className="audit-value"><StatusDot tone="acid" /> ACTIVE · 4ms</span>
+          <span className="audit-value"><StatusDot tone="acid" /> ACTIVE · {report.entities.length} MATCHES</span>
         </div>
         <div className="audit-item">
           <span className="audit-label">NETWORK EGRESS</span>
@@ -679,8 +880,10 @@ export function Airlock() {
           <span className="audit-value">SANDBOX · ZERO RETENTION</span>
         </div>
         <div className="audit-item audit-item--right">
-          <CheckCircle2 size={12} />
-          <span className="audit-value">POLICY ZT-04 SATISFIED</span>
+          {chainIntact ? <CheckCircle2 size={12} /> : <ShieldAlert size={12} />}
+          <span className="audit-value">
+            {chainIntact ? 'RECEIPT CHAIN INTACT' : `CHAIN BROKEN @ #${String(chainBreak).padStart(2, '0')}`}
+          </span>
         </div>
       </div>
 

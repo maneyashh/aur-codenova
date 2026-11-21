@@ -6,9 +6,9 @@ import { useSimulation } from '../sim/SimulationProvider';
 import type { ScenarioId } from '../sim/types';
 import { Kbd, StatusDot } from './ui';
 
-const DATASETS: Array<{ id: ScenarioId; label: string }> = [
-  { id: 'visual', label: 'Dataset A: Visual Crisis' },
-  { id: 'privacy', label: 'Dataset B: Privacy Breach' },
+const DATASETS: Array<{ id: ScenarioId; code: string; label: string }> = [
+  { id: 'visual', code: 'A', label: 'Visual crisis' },
+  { id: 'privacy', code: 'B', label: 'Privacy breach' },
 ];
 
 function utcClock() {
@@ -76,8 +76,10 @@ export function Topbar() {
                 className={`dataset-switch-item ${active ? 'is-active' : ''}`}
                 aria-pressed={active}
                 onClick={() => switchScenario(dataset.id)}
+                title={`Dataset ${dataset.code} · ${dataset.label}`}
               >
-                {dataset.label}
+                <span className="dataset-code">{dataset.code}</span>
+                <span className="dataset-label">{dataset.label}</span>
               </button>
             );
           })}
@@ -89,15 +91,20 @@ export function Topbar() {
           <strong>ONLINE</strong>
         </div>
 
-        <div className="topbar-clock" aria-label="Coordinated Universal Time">
+        <div className="topbar-clock" aria-label="Live coordinated universal time" title="Live UTC wall clock. The temporal engine evaluates a pinned simulation date.">
           <span className="clock-date">{clock.date}</span>
           <span className="clock-time">{clock.time}</span>
           <span className="clock-zone">UTC</span>
         </div>
 
-        <button type="button" className="btn btn-primary btn-small judge-btn" onClick={restartTour}>
+        <button
+          type="button"
+          className="btn btn-primary btn-small judge-btn"
+          onClick={restartTour}
+          title="Replay the five-step guided walkthrough"
+        >
           <Sparkles size={12} strokeWidth={2} />
-          Judge Walkthrough — Complete Guide
+          <span className="judge-label">Guided walkthrough</span>
         </button>
       </div>
     </header>

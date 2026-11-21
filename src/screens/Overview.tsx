@@ -33,20 +33,11 @@ import {
 } from '../components/ui';
 import { useStudio } from '../state/studio';
 import { useSimulation } from '../sim/SimulationProvider';
-import {
-  clearanceNotes,
-  initialCompileLogs,
-  pipelineStages,
-  radarAxes,
-  stageLogs,
-  telemetryDeltas,
-  traceSummary,
-  verdictFeed,
-  type FeedStatus,
-} from '../data/overview';
+import { verdictFeed, type CompileLog, type FeedStatus } from '../data/overview';
 import { brandProfile } from '../data/brand';
-import { TODAY, addDays, formatShortDate } from '../core/claims';
+import { formatShortDate } from '../core/claims';
 import { ARBITER_THRESHOLD, runArbiterPass } from '../core/arbiter';
+import { buildClearanceReport } from '../core/compiler';
 
 type Phase = 'complete' | 'running';
 type FeedFilter = 'ALL' | 'FLAGGED' | 'CLEARED';
@@ -76,11 +67,11 @@ const stageToneClass = {
 
 const utcStamp = () => new Date().toISOString().slice(11, 23);
 
-function RadarChart() {
+function RadarChart({ axes }: { axes: { label: string; value: number; baseline: number }[] }) {
   const size = 320;
   const center = size / 2;
   const radius = 94;
-  const count = radarAxes.length;
+  const count = axes.length;
   const point = (value: number, index: number) => {
     const angle = (Math.PI * 2 * index) / count - Math.PI / 2;
     const r = (value / 100) * radius;
@@ -88,10 +79,10 @@ function RadarChart() {
   };
 
   const ring = (value: number) =>
-    radarAxes.map((_, index) => point(value, index).join(',')).join(' ');
+    axes.map((_, index) => point(value, index).join(',')).join(' ');
 
-  const baseline = radarAxes.map((axis, index) => point(axis.baseline, index).join(',')).join(' ');
-  const current = radarAxes.map((axis, index) => point(axis.value, index).join(',')).join(' ');
+  const baseline = axes.map((axis, index) => point(axis.baseline, index).join(',')).join(' ');
+  const current = axes.map((axis, index) => point(axis.value, index).join(',')).join(' ');
 
   return (
     <svg className="radar-chart" viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Brand drift radar">
@@ -108,13 +99,13 @@ function RadarChart() {
           className={`radar-grid ${value === 100 ? 'radar-grid--outer' : ''}`}
         />
       ))}
-      {radarAxes.map((axis, index) => {
+      {axes.map((axis, index) => {
         const [x, y] = point(100, index);
         return <line key={axis.label} x1={center} y1={center} x2={x} y2={y} className="radar-spoke" />;
       })}
       <polygon points={baseline} className="radar-baseline" />
       <polygon points={current} className="radar-current" />
-      {radarAxes.map((axis, index) => {
+      {axes.map((axis, index) => {
         const [x, y] = point(axis.value, index);
         const angle = (Math.PI * 2 * index) / count - Math.PI / 2;
         const labelX = center + Math.cos(angle) * (radius + 28);
@@ -141,47 +132,61 @@ export function Overview() {
   const { navigate, compileToken, runCompilation, pushToast, publishOffset } = useStudio();
   const { scenario, tourActive, step, nextStep, markPipelineStarted, markPipelineComplete } =
     useSimulation();
+  const report = useMemo(
+    () => buildClearanceReport(scenario, publishOffset),
+    [scenario, publishOffset],
+  );
+
   const [phase, setPhase] = useState<Phase>('complete');
-  const [stageIndex, setStageIndex] = useState(pipelineStages.length);
-  const [logs, setLogs] = useState(initialCompileLogs);
+  const [stageIndex, setStageIndex] = useState(report.stages.length);
+  const [logs, setLogs] = useState<CompileLog[]>(report.logs);
   const [filter, setFilter] = useState<FeedFilter>('ALL');
   const [stress, setStress] = useState(false);
   const [arbiterLogs, setArbiterLogs] = useState<ArbiterLog[]>([]);
   const previousToken = useRef(compileToken);
+  const previousScenario = useRef(report.scenario.id);
 
-  const asset = scenario?.asset;
-  const command = scenario?.command;
-  const notes = command?.notes ?? clearanceNotes;
-  const verdictScore = command?.verdictScore ?? 91.4;
-  const verdictLabel = command?.verdictLabel ?? 'CLEAR WITH NOTES';
-  const verdictTone = command?.verdictTone ?? 'amber';
-  const verdictCopy =
-    command?.verdictCopy ??
-    'Publishable once two deterministic findings are resolved. No model judgement was used.';
-  const verdictSignature = command?.signature ?? 'AURA-CORE / SHA-9F2C';
-  const accent = scenario?.accent ?? '#D8FF4F';
-  const riskRows =
-    scenario?.id === 'visual'
-      ? [
-          { label: 'Perceptual drift', value: '26.9', note: 'max ΔE 73.1', tone: 'red' as const },
-          { label: 'Claim validity', value: '74.0', note: '1 expiry block', tone: 'red' as const },
-          { label: 'Voice fidelity', value: '94.6', note: '6 tokens patched', tone: 'acid' as const },
-        ]
-      : scenario?.id === 'privacy'
-        ? [
-            { label: 'Perceptual drift', value: '97.7', note: 'max ΔE 2.28', tone: 'acid' as const },
-            { label: 'Claim validity', value: '100.0', note: '0 expiry blocks', tone: 'acid' as const },
-            { label: 'Voice fidelity', value: '50.9', note: 'generative rewrite', tone: 'red' as const },
-          ]
-        : telemetryDeltas;
-  const [titleMain, ...titleRestParts] = (asset?.title ?? 'Orbital Launch — Hero 07').split(' — ');
-  const titleRest = titleRestParts.join(' — ');
+  const asset = report.asset;
+  const accent = report.scenario.accent;
+  const notes = report.notes;
 
   const arbiter = useMemo(
-    () => runArbiterPass(scenario?.id ?? null, stress),
-    [scenario?.id, stress],
+    () => (stress ? runArbiterPass(report.signals, true) : report.arbiter),
+    [report.arbiter, report.signals, stress],
   );
   const lowestPrimary = Math.min(...arbiter.routes.map((route) => route.primaryConfidence));
+
+  const feedRows = useMemo(() => {
+    const [head, ...rest] = verdictFeed;
+    const status: FeedStatus =
+      report.verdictTone === 'acid' ? 'CLEAR' : report.verdictTone === 'amber' ? 'REVIEW' : 'BLOCKED';
+    return [
+      {
+        ...head,
+        id: report.asset.id,
+        name: report.asset.name,
+        channel: report.asset.channel,
+        score: report.score.toFixed(1),
+        status,
+        tint: accent,
+      },
+      ...rest,
+    ];
+  }, [accent, report]);
+
+  const flaggedCount = feedRows.filter((entry) => entry.status !== 'CLEAR').length;
+  const clearedCount = feedRows.length - flaggedCount;
+
+  // Reset the local pipeline view when the dataset changes.
+  useEffect(() => {
+    if (previousScenario.current === report.scenario.id) return;
+    previousScenario.current = report.scenario.id;
+    setPhase('complete');
+    setStageIndex(report.stages.length);
+    setLogs(report.logs);
+    setStress(false);
+    setArbiterLogs([]);
+  }, [report]);
 
   useEffect(() => {
     if (compileToken === previousToken.current) return;
@@ -195,43 +200,42 @@ export function Overview() {
 
   useEffect(() => {
     if (phase !== 'running') return;
-    if (stageIndex >= pipelineStages.length) {
+    if (stageIndex >= report.stages.length) {
       setPhase('complete');
+      setLogs(report.logs);
       markPipelineComplete();
       pushToast({
-        title: `Clearance issued · ${verdictScore.toFixed(1)}`,
-        detail: `Verdict ${verdictLabel}. ${notes.length} deterministic findings require resolution.`,
-        tone: verdictTone === 'red' ? 'block' : 'watch',
+        title: `Clearance issued · ${report.score.toFixed(1)}`,
+        detail: `Verdict ${report.verdictLabel}. ${notes.length} deterministic findings require resolution.`,
+        tone: report.verdictTone === 'red' ? 'block' : report.verdictTone === 'amber' ? 'watch' : 'clear',
       });
       return;
     }
 
-    const stage = pipelineStages[stageIndex];
-    setLogs((current) => [...current, stageLogs[stage.id]]);
+    const stage = report.stages[stageIndex];
+    setLogs((current) => [...current, report.logByStage[stage.id]]);
     const timer = window.setTimeout(() => {
       setStageIndex((current) => current + 1);
-    }, 580);
+    }, 520);
     return () => window.clearTimeout(timer);
   }, [
     phase,
     stageIndex,
     pushToast,
     markPipelineComplete,
-    verdictScore,
-    verdictLabel,
     notes.length,
-    verdictTone,
+    report,
   ]);
 
-  const progress = phase === 'running' ? (stageIndex / pipelineStages.length) * 100 : 100;
+  const progress = phase === 'running' ? (stageIndex / report.stages.length) * 100 : 100;
 
-  const filteredFeed = verdictFeed.filter((asset) => {
+  const filteredFeed = feedRows.filter((entry) => {
     if (filter === 'ALL') return true;
-    if (filter === 'FLAGGED') return asset.status !== 'CLEAR';
-    return asset.status === 'CLEAR';
+    if (filter === 'FLAGGED') return entry.status !== 'CLEAR';
+    return entry.status === 'CLEAR';
   });
 
-  const publishDate = formatShortDate(addDays(TODAY, publishOffset));
+  const publishDate = formatShortDate(report.publishDate);
 
   const openAsset = (status: FeedStatus, kind: string) => {
     if (status === 'BLOCKED') navigate('airlock');
@@ -266,7 +270,7 @@ export function Overview() {
       setArbiterLogs([]);
       return;
     }
-    const pass = runArbiterPass(scenario?.id ?? null, true);
+    const pass = runArbiterPass(report.signals, true);
     setStress(true);
     setArbiterLogs(
       pass.traceLines.map((line) => ({
@@ -277,7 +281,7 @@ export function Overview() {
     );
     pushToast({
       title: `Arbiter resolved ${pass.fallbacksTriggered} edge cases · 0 external calls`,
-      detail: `Confidence below ${ARBITER_THRESHOLD.toFixed(2)} rerouted to local AST/WASM engines → ${(pass.overallConfidence * 100).toFixed(1)}% in ${pass.totalMs.toFixed(1)}ms. Zero external model leakage.`,
+      detail: `Confidence below ${ARBITER_THRESHOLD.toFixed(2)} rerouted to independent symbolic cross-checks → ${(pass.overallConfidence * 100).toFixed(1)}% in ${pass.totalMs.toFixed(1)}ms.`,
       tone: 'clear',
     });
   };
@@ -336,37 +340,39 @@ export function Overview() {
 
       <div className="stats-row">
         <StatCard
-          label="Portfolio integrity"
-          value="98.2"
+          label="Asset integrity"
+          value={report.score.toFixed(1)}
           unit="%"
-          delta="+0.6%"
-          spark={[94.1, 94.8, 95.2, 96.4, 96.1, 97.2, 97.8, 98.2]}
-          note="Across 1,284 cleared assets"
+          delta={report.verdictTone === 'acid' ? 'CLEAR' : report.verdictTone === 'amber' ? 'REVIEW' : 'BLOCK'}
+          deltaTone={report.verdictTone === 'acid' ? 'acid' : report.verdictTone === 'amber' ? 'amber' : 'red'}
+          spark={[report.score - 6, report.score - 4, report.score - 3, report.score - 1, report.score]}
+          sparkTone={report.verdictTone === 'red' ? 'red' : report.verdictTone === 'amber' ? 'amber' : 'acid'}
+          note={`${notes.length} open notes · ${report.verdictLabel}`}
         />
         <StatCard
-          label="Assets cleared"
-          value="1,284"
-          delta="+34"
-          spark={[62, 68, 64, 76, 82, 79, 91, 96]}
+          label="Entities vaulted"
+          value={String(report.airlock.entities.length).padStart(2, '0')}
+          delta="LOCAL"
+          spark={[2, 3, 3, 4, report.airlock.entities.length]}
           sparkTone="blue"
-          note="This week · 5 channels"
+          note={`${report.airlock.protectedCharacters} chars protected`}
         />
         <StatCard
-          label="Open drift flags"
-          value="03"
-          delta="−2"
+          label="Claims blocked"
+          value={String(report.temporal.blocked).padStart(2, '0')}
+          delta={`${report.temporal.watch} WATCH`}
           deltaTone="amber"
-          spark={[8, 7, 9, 6, 6, 5, 4, 3]}
+          spark={[0, 1, 1, 2, report.temporal.blocked]}
           sparkTone="amber"
-          note="2 visual · 1 temporal"
+          note={`Evaluated at ${publishDate}`}
         />
         <StatCard
-          label="Median clearance"
-          value="284"
+          label="Pipeline latency"
+          value={String(Math.round(report.totalMs))}
           unit="ms"
-          delta="−18ms"
-          spark={[382, 364, 372, 342, 322, 310, 298, 284]}
-          note="P95 412ms · local deterministic"
+          delta="LOCAL"
+          spark={[310, 298, 302, 290, report.totalMs]}
+          note={`${report.stages.length} stages · 0 model calls`}
         />
       </div>
 
@@ -377,19 +383,21 @@ export function Overview() {
               <div className="compile-runline">
                 <StatusDot tone={phase === 'running' ? 'amber' : 'acid'} pulse={phase === 'running'} />
                 <span>{phase === 'running' ? 'ACTIVE COMPILATION' : 'RUN COMPLETE'}</span>
-                <span className="compile-run-id">{traceSummary.runId}</span>
+                <span className="compile-run-id">{report.runId}</span>
                 <span className="compile-sep">/</span>
-                <span className="compile-mono">{phase === 'running' ? `${Math.round(progress)}%` : '03.216s'}</span>
+                <span className="compile-mono">
+                  {phase === 'running' ? `${Math.round(progress)}%` : `${(report.totalMs / 1000).toFixed(3)}s`}
+                </span>
               </div>
               <div className="compile-title-row">
                 <h2 className="compile-title">
-                  {titleMain} {titleRest ? <span>— {titleRest}</span> : null}
+                  {report.headline.main}{' '}
+                  {report.headline.rest ? <span>— {report.headline.rest}</span> : null}
                 </h2>
-                <span className="asset-tag">{asset?.id ?? 'AST-2291'}</span>
+                <span className="asset-tag">{asset.id}</span>
               </div>
               <p className="compile-sub">
-                {asset?.subtitle ?? 'Visual specimen + campaign copy'} · publish window NOV{' '}
-                {publishDate} · 0 bytes external
+                {asset.subtitle} · publish window {publishDate} · 0 bytes external
               </p>
             </div>
             <div className="compile-thumb" aria-hidden="true">
@@ -408,7 +416,7 @@ export function Overview() {
             className={`pipeline ${phase === 'running' ? 'is-running' : ''}`}
             style={{ ['--chain-progress' as string]: `${progress}%` }}
           >
-            {pipelineStages.map((stage, index) => {
+            {report.stages.map((stage, index) => {
               const Icon = stageIcons[index];
               const isComplete = phase === 'complete' || index < stageIndex;
               const isRunning = phase === 'running' && index === stageIndex;
@@ -480,15 +488,15 @@ export function Overview() {
                   <span className="log-time">··:··:··.···</span>
                   <span className="log-stage">[EXEC]</span>
                   <span className="log-text">
-                    {pipelineStages[Math.min(stageIndex, pipelineStages.length - 1)]?.label.toLowerCase()} stage running
+                    {report.stages[Math.min(stageIndex, report.stages.length - 1)]?.label.toLowerCase()} stage running
                   </span>
                   <span className="console-cursor" />
                 </div>
               ) : (
                 <div className="console-line console-line--muted">
-                  <span className="log-time">14:31:03.217</span>
+                  <span className="log-time">{report.logs[report.logs.length - 1].time}</span>
                   <span className="log-stage">[SEAL]</span>
-                  <span className="log-text">audit record hashed · sha256:9f2c…c41a · awaiting note resolution</span>
+                  <span className="log-text">audit record hashed · sha256:{report.traceHashShort} · awaiting note resolution</span>
                   <span className="console-cursor" />
                 </div>
               )}
@@ -500,7 +508,7 @@ export function Overview() {
               <span className="console-foot-item">
                 {String(logs.length + arbiterLogs.length).padStart(2, '0')} EVENTS
               </span>
-              <span className="console-foot-item">SHA-256 9F2C…C41A</span>
+              <span className="console-foot-item">SHA-256 {report.traceHashShort}</span>
               <span className="console-foot-right">0 MODEL CALLS</span>
             </div>
           </div>
@@ -510,39 +518,39 @@ export function Overview() {
           <PanelHead
             kicker="Clearance verdict"
             title="Final integrity"
-            meta={<span className="meta-live"><StatusDot tone={verdictTone} /> ISSUED</span>}
+            meta={<span className="meta-live"><StatusDot tone={report.verdictTone} /> ISSUED</span>}
           />
           <div className="verdict-hero">
             <RingGauge
-              value={verdictScore}
-              display={verdictScore.toFixed(1)}
+              value={report.score}
+              display={report.score.toFixed(1)}
               label="INTEGRITY"
-              sub={verdictLabel}
-              tone={verdictTone}
+              sub={report.verdictShort}
+              tone={report.verdictTone}
               size={112}
             />
             <div className="verdict-copy">
-              <Badge tone={verdictTone} dot>
-                {verdictLabel}
+              <Badge tone={report.verdictTone} dot>
+                {report.verdictLabel}
               </Badge>
-              <p>{verdictCopy}</p>
-              <span className="verdict-signature">{verdictSignature}</span>
+              <p>{report.verdictCopy}</p>
+              <span className="verdict-signature">{report.signature}</span>
             </div>
           </div>
 
           <div className="risk-block">
             <div className="risk-head">
-              <span>RISK DECOMPOSITION</span>
-              <span>3 DOMAINS</span>
+              <span>DOMAIN INTEGRITY</span>
+              <span>4 DOMAINS</span>
             </div>
-            {riskRows.map((delta) => (
-              <div className="risk-row" key={delta.label}>
+            {report.domains.map((domain) => (
+              <div className="risk-row" key={domain.key}>
                 <div className="risk-row-top">
-                  <span>{delta.label}</span>
-                  <span className={`risk-value risk-value--${delta.tone}`}>{delta.value}</span>
+                  <span>{domain.label}</span>
+                  <span className={`risk-value risk-value--${domain.tone}`}>{domain.value.toFixed(1)}</span>
                 </div>
-                <Meter value={Number(delta.value)} tone={delta.tone} height={3} />
-                <span className="risk-note">{delta.note}</span>
+                <Meter value={domain.value} tone={domain.tone} height={3} />
+                <span className="risk-note">{domain.note}</span>
               </div>
             ))}
           </div>
@@ -577,8 +585,8 @@ export function Overview() {
       <div className="arbiter-wrap" data-tour="arbiter">
         <Panel className="arbiter-panel" bracket>
           <PanelHead
-            kicker="Round 3 · Improvement 01"
-            title="Autonomous Multi-Model Arbiter"
+            kicker="Adaptive routing · symbolic ensemble"
+            title="Autonomous Multi-Engine Arbiter"
             meta={`CUTOFF ${ARBITER_THRESHOLD.toFixed(2)} · 0 EXTERNAL LLM CALLS`}
             actions={
               <button
@@ -595,7 +603,7 @@ export function Overview() {
           <div className="arbiter-body">
             <div className="arbiter-gauge">
               <div className="arbiter-gauge-top">
-                <span className="arbiter-gauge-label">CONFIDENCE GAUGE</span>
+                <span className="arbiter-gauge-label">FUSED CONFIDENCE</span>
                 <strong className={arbiter.fallbacksTriggered > 0 ? 'is-resolved' : ''}>
                   {(arbiter.overallConfidence * 100).toFixed(1)}%
                 </strong>
@@ -603,7 +611,7 @@ export function Overview() {
               <div
                 className="arbiter-track"
                 role="img"
-                aria-label={`Overall confidence ${(arbiter.overallConfidence * 100).toFixed(1)} percent, cutoff ${ARBITER_THRESHOLD}`}
+                aria-label={`Fused confidence ${(arbiter.overallConfidence * 100).toFixed(1)} percent, cutoff ${ARBITER_THRESHOLD}`}
               >
                 <i className="arbiter-fill" style={{ width: `${arbiter.overallConfidence * 100}%` }} />
                 <i className="arbiter-low" style={{ left: `${lowestPrimary * 100}%` }} />
@@ -625,7 +633,7 @@ export function Overview() {
                 <span>PRIMARY ENGINE</span>
                 <span>CONFIDENCE</span>
                 <span />
-                <span>SECONDARY AST/WASM FALLBACK</span>
+                <span>SECONDARY CROSS-CHECK</span>
                 <span>RESOLVED</span>
               </div>
               {arbiter.routes.map((route) => (
@@ -651,9 +659,18 @@ export function Overview() {
                   <ArrowRight size={12} strokeWidth={1.8} className="arbiter-arrow" />
                   <span className="arbiter-cell">
                     <strong>{route.fellBack ? route.secondaryEngine : 'not required'}</strong>
-                    <em>{route.fellBack ? `${route.ms}ms · local` : 'primary accepted'}</em>
+                    <em>{route.fellBack ? route.secondaryNote : 'primary accepted'}</em>
                   </span>
-                  <span className="arbiter-resolved">
+                  <span
+                    className={`arbiter-resolved ${
+                      route.resolvedConfidence < ARBITER_THRESHOLD ? 'is-marginal' : ''
+                    }`}
+                    title={
+                      route.fellBack
+                        ? `Cross-check ${(route.secondaryConfidence * 100).toFixed(1)}% discounted by disagreement with the primary`
+                        : 'Primary pass accepted without escalation'
+                    }
+                  >
                     {(route.resolvedConfidence * 100).toFixed(1)}%
                   </span>
                 </div>
@@ -677,20 +694,20 @@ export function Overview() {
         <div className="remediation-copy">
           <span className="panel-kicker">Remediation ready</span>
           <h2>
-            {scenario?.id === 'privacy'
+            {report.voice.variant === 'llm'
               ? 'Restore the author. Redact the payload.'
               : 'Patch the signal. Expire the claim.'}
           </h2>
           <p>
-            {scenario?.id === 'privacy'
-              ? 'Fourteen identifiers are vaulted locally and the model paragraph is replaced by a minimum-edit patch. The author’s cadence survives intact.'
+            {report.voice.variant === 'llm'
+              ? `${report.airlock.entities.length} identifiers are vaulted locally and the model paragraph is replaced by a minimum-edit patch. The author’s cadence survives intact.`
               : 'Solar Lime replaces the off-brand magenta, the ORBIT30 claim is expired before publish, and the lockup regains its 24px clearspace. No sentence is regenerated.'}
           </p>
         </div>
         <div className="remediation-actions">
           <span className="remediation-metric">
-            <strong>94.8</strong>
-            <span>FIDELITY · 6 TOKENS</span>
+            <strong>{report.voice.score.toFixed(1)}</strong>
+            <span>FIDELITY · {report.voice.patches} TOKENS</span>
           </span>
           <button type="button" className="btn btn-primary" onClick={openRemediation}>
             <Sparkles size={14} strokeWidth={1.8} />
@@ -713,9 +730,9 @@ export function Overview() {
                 ariaLabel="Filter verdict feed"
                 size="sm"
                 options={[
-                  { value: 'ALL', label: 'All', count: verdictFeed.length },
-                  { value: 'FLAGGED', label: 'Flagged', count: 3 },
-                  { value: 'CLEARED', label: 'Cleared', count: 3 },
+                  { value: 'ALL', label: 'All', count: feedRows.length },
+                  { value: 'FLAGGED', label: 'Flagged', count: flaggedCount },
+                  { value: 'CLEARED', label: 'Cleared', count: clearedCount },
                 ]}
               />
             }
@@ -728,41 +745,41 @@ export function Overview() {
               <span>Verdict</span>
               <span className="feed-age">Age</span>
             </div>
-            {filteredFeed.map((asset) => {
-              const Icon = feedIcons[asset.kind];
+            {filteredFeed.map((entry) => {
+              const Icon = feedIcons[entry.kind];
               return (
                 <button
                   type="button"
                   className="feed-row feed-row--item"
-                  key={asset.id}
-                  onClick={() => openAsset(asset.status, asset.kind)}
+                  key={entry.id}
+                  onClick={() => openAsset(entry.status, entry.kind)}
                 >
                   <span className="feed-asset">
-                    <span className="feed-thumb" style={{ ['--asset-tint' as string]: asset.tint }}>
+                    <span className="feed-thumb" style={{ ['--asset-tint' as string]: entry.tint }}>
                       <Icon size={12} strokeWidth={1.6} />
                     </span>
                     <span className="feed-asset-copy">
-                      <strong>{asset.name}</strong>
-                      <span>{asset.id}</span>
+                      <strong>{entry.name}</strong>
+                      <span>{entry.id}</span>
                     </span>
                   </span>
-                  <span className="feed-channel">{asset.channel}</span>
-                  <span className="feed-score">{asset.score}</span>
+                  <span className="feed-channel">{entry.channel}</span>
+                  <span className="feed-score">{entry.score}</span>
                   <span>
-                    <Badge tone={statusTone[asset.status]} dot>
-                      {asset.status}
+                    <Badge tone={statusTone[entry.status]} dot>
+                      {entry.status}
                     </Badge>
                   </span>
-                  <span className="feed-age">{asset.age}</span>
+                  <span className="feed-age">{entry.age}</span>
                 </button>
               );
             })}
           </div>
           <div className="feed-foot">
             <span>
-              <StatusDot tone="amber" /> 3 assets awaiting deterministic note resolution
+              <StatusDot tone="amber" /> {flaggedCount} assets awaiting deterministic note resolution
             </span>
-            <span className="feed-foot-right">QUEUE 02:41:08 · AUTO-REVIEW OFF</span>
+            <span className="feed-foot-right">SESSION QUEUE · AUTO-REVIEW OFF</span>
           </div>
         </Panel>
 
@@ -773,27 +790,27 @@ export function Overview() {
             meta={<span className="meta-live"><StatusDot tone="acid" pulse /> LIVE</span>}
           />
           <div className="radar-wrap">
-            <RadarChart />
+            <RadarChart axes={report.radarAxes} />
             <div className="radar-legend">
               <span><i className="legend-dot legend-dot--acid" /> Current</span>
               <span><i className="legend-dash" /> Contract baseline</span>
             </div>
           </div>
           <div className="radar-mini">
-            {riskRows.map((delta) => (
-              <div className="radar-mini-item" key={delta.label}>
-                <span className={`radar-mini-mark radar-mini-mark--${delta.tone}`} />
-                <span className="radar-mini-label">{delta.label}</span>
-                <strong className={`radar-mini-value radar-mini-value--${delta.tone}`}>
-                  {delta.value}
+            {report.domains.map((domain) => (
+              <div className="radar-mini-item" key={domain.key}>
+                <span className={`radar-mini-mark radar-mini-mark--${domain.tone}`} />
+                <span className="radar-mini-label">{domain.label}</span>
+                <strong className={`radar-mini-value radar-mini-value--${domain.tone}`}>
+                  {domain.value.toFixed(1)}
                 </strong>
               </div>
             ))}
           </div>
           <div className="radar-foot">
-            <span>6 AXES / 41 SYMBOLIC RULES</span>
+            <span>6 AXES / {report.airlock.ruleCount} SYMBOLIC RULES</span>
             <span className="radar-foot-right">
-              <Sparkline values={[88, 86, 84, 82, 85, 88, 91]} tone="amber" height={16} width={62} />
+              <Sparkline values={report.radarAxes.map((axis) => axis.value)} tone="amber" height={16} width={62} />
               Δ vs contract
             </span>
           </div>
@@ -806,7 +823,7 @@ export function Overview() {
         </span>
         <span>POLICY {brandProfile.policySet}</span>
         <span>OPERATOR {brandProfile.operator}</span>
-        <span className="footline-right">NO EXTERNAL INFERENCE IN THIS SESSION</span>
+        <span className="footline-right">NO EXTERNAL INFERENCE · {report.traceHashShort}</span>
       </div>
     </div>
   );

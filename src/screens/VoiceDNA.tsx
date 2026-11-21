@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   ArrowRight,
@@ -38,6 +38,8 @@ import {
   toneContract,
   type TokenPatch,
 } from '../core/voice';
+import { sha256Hex, shortHash } from '../core/vault';
+import { downloadJson } from '../lib/download';
 
 type VoiceVariant = 'source' | 'surgical' | 'llm';
 
@@ -141,12 +143,27 @@ export function VoiceDNA() {
   const scenario = useScenario();
   const [variant, setVariant] = useState<VoiceVariant>(scenario?.voiceVariant ?? 'surgical');
   const [committed, setCommitted] = useState(false);
+  const [committedAt, setCommittedAt] = useState<string | null>(null);
 
   // Dataset A opens on the surgical patch; Dataset B opens on the model rewrite.
   useEffect(() => {
     setVariant(scenario?.voiceVariant ?? 'surgical');
     setCommitted(false);
+    setCommittedAt(null);
   }, [scenario?.id, scenario?.voiceVariant]);
+
+  // The guided walkthrough's remediation step asks for the surgical patch; honour
+  // that even when the dataset opened on the generative rewrite.
+  useEffect(() => {
+    const onPatch = () => setVariant('surgical');
+    window.addEventListener('aura:voice-patch', onPatch);
+    return () => window.removeEventListener('aura:voice-patch', onPatch);
+  }, []);
+
+  const fingerprint = useMemo(
+    () => shortHash(sha256Hex(`${VOICE_ORIGINAL}\n${VOICE_SURGICAL}`)),
+    [],
+  );
 
   const fidelity = variant === 'llm' ? llmFidelity : variant === 'source' ? {
     score: 100,
@@ -169,8 +186,9 @@ export function VoiceDNA() {
   const authorize = () => {
     if (committed) return;
     setCommitted(true);
+    setCommittedAt(new Date().toISOString());
     pushToast({
-      title: `Surgical patch authorised · ${surgicalFidelity.score.toFixed(1)} fidelity`,
+      title: `Surgical patch authorized · ${surgicalFidelity.score.toFixed(1)} fidelity`,
       detail: `${tokenPatches.length} lexical tokens replaced. Sentence architecture, cadence and punctuation preserved.`,
       tone: 'clear',
     });
@@ -197,13 +215,30 @@ export function VoiceDNA() {
             <button
               type="button"
               className="btn btn-ghost"
-              onClick={() =>
+              onClick={() => {
+                downloadJson('aura-voice-diff.json', {
+                  schema: 'aura-gov/voice-diff/v2',
+                  exportedAt: new Date().toISOString(),
+                  scenario: scenario?.id ?? 'baseline',
+                  fingerprint: sha256Hex(`${VOICE_ORIGINAL}\n${VOICE_SURGICAL}`),
+                  fidelity: {
+                    source: 100,
+                    surgical: surgicalFidelity,
+                    llm: llmFidelity,
+                  },
+                  patches: tokenPatches,
+                  documents: {
+                    source: VOICE_ORIGINAL,
+                    surgical: VOICE_SURGICAL,
+                    llm: VOICE_LLM,
+                  },
+                });
                 pushToast({
-                  title: 'Voice diff exported',
-                  detail: '6 atomic substitutions · cadence fingerprint 7c3a…e12b.',
+                  title: 'Voice diff downloaded',
+                  detail: `${tokenPatches.length} atomic substitutions · fingerprint ${fingerprint} · no sentences regenerated.`,
                   tone: 'clear',
-                })
-              }
+                });
+              }}
             >
               <Download size={14} strokeWidth={1.7} />
               Export diff
@@ -354,10 +389,10 @@ export function VoiceDNA() {
             <span className="doc-foot-token">
               {committed ? (
                 <>
-                  <CheckCircle2 size={12} /> COMMITTED · 09:41:22 UTC
+                  <CheckCircle2 size={12} /> COMMITTED · {committedAt?.slice(11, 19) ?? ''} UTC
                 </>
               ) : (
-                <>HASH 7C3A…E12B</>
+                <>HASH {fingerprint}</>
               )}
             </span>
           </div>
@@ -458,7 +493,7 @@ export function VoiceDNA() {
 
           <div className="fingerprint-foot">
             <Fingerprint size={13} strokeWidth={1.7} />
-            <span>FINGERPRINT 7C3A…E12B</span>
+            <span>FINGERPRINT {fingerprint}</span>
             <span className="fingerprint-foot-right">LOCAL ONLY</span>
           </div>
         </Panel>

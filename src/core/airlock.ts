@@ -4,6 +4,9 @@
  * All detection happens on the local node. The external model never receives
  * raw codenames, names, addresses, secrets or network identifiers.
  * A deterministic lexicon + pattern pass produces reversible vault tokens.
+ *
+ * The detector is intentionally transparent: every match carries the exact
+ * rule that produced it and a confidence that can be independently audited.
  */
 
 export type EntityType =
@@ -14,7 +17,12 @@ export type EntityType =
   | 'PHONE'
   | 'SECRET'
   | 'IP'
-  | 'ADDRESS';
+  | 'ADDRESS'
+  | 'SSN'
+  | 'DOB'
+  | 'MRN'
+  | 'CARD'
+  | 'IBAN';
 
 export type DetectedEntity = {
   id: string;
@@ -38,26 +46,32 @@ export type AirlockReport = {
   protectedCharacters: number;
   riskScore: number;
   vault: { token: string; type: EntityType; rule: string }[];
+  ruleCount: number;
 };
 
 export const entityTypeMeta: Record<
   EntityType,
-  { label: string; short: string; className: string }
+  { label: string; short: string; className: string; sensitivity: number }
 > = {
-  CODENAME: { label: 'Classified codename', short: 'CDN', className: 'entity-codename' },
-  PROGRAM: { label: 'Internal program', short: 'PRG', className: 'entity-program' },
-  PERSON: { label: 'Person / PII', short: 'PER', className: 'entity-person' },
-  EMAIL: { label: 'Email address', short: 'EML', className: 'entity-email' },
-  PHONE: { label: 'Phone number', short: 'TEL', className: 'entity-phone' },
-  SECRET: { label: 'API / live secret', short: 'SEC', className: 'entity-secret' },
-  IP: { label: 'Internal network', short: 'NET', className: 'entity-ip' },
-  ADDRESS: { label: 'Physical facility', short: 'ADR', className: 'entity-address' },
+  CODENAME: { label: 'Classified codename', short: 'CDN', className: 'entity-codename', sensitivity: 18 },
+  PROGRAM: { label: 'Internal program', short: 'PRG', className: 'entity-program', sensitivity: 8 },
+  PERSON: { label: 'Person / PII', short: 'PER', className: 'entity-person', sensitivity: 10 },
+  EMAIL: { label: 'Email address', short: 'EML', className: 'entity-email', sensitivity: 12 },
+  PHONE: { label: 'Phone number', short: 'TEL', className: 'entity-phone', sensitivity: 10 },
+  SECRET: { label: 'API / live secret', short: 'SEC', className: 'entity-secret', sensitivity: 28 },
+  IP: { label: 'Internal network', short: 'NET', className: 'entity-ip', sensitivity: 8 },
+  ADDRESS: { label: 'Physical facility', short: 'ADR', className: 'entity-address', sensitivity: 6 },
+  SSN: { label: 'Government identifier', short: 'SSN', className: 'entity-ssn', sensitivity: 30 },
+  DOB: { label: 'Date of birth', short: 'DOB', className: 'entity-dob', sensitivity: 12 },
+  MRN: { label: 'Medical record number', short: 'MRN', className: 'entity-mrn', sensitivity: 20 },
+  CARD: { label: 'Payment card', short: 'CRD', className: 'entity-card', sensitivity: 32 },
+  IBAN: { label: 'Bank account / IBAN', short: 'IBN', className: 'entity-iban', sensitivity: 22 },
 };
 
 const CODENAMES: Array<{ raw: string; type: EntityType; rule: string }> = [
-  { raw: 'Project HALCYON', type: 'CODENAME', rule: 'Classified lexicon v9' },
-  { raw: 'PROJECT HALCYON', type: 'CODENAME', rule: 'Classified lexicon v9' },
-  { raw: 'NIGHTGLASS', type: 'CODENAME', rule: 'Classified lexicon v9' },
+  { raw: 'Project HALCYON', type: 'CODENAME', rule: 'Classified lexicon v10' },
+  { raw: 'PROJECT HALCYON', type: 'CODENAME', rule: 'Classified lexicon v10' },
+  { raw: 'NIGHTGLASS', type: 'CODENAME', rule: 'Classified lexicon v10' },
   { raw: 'ORBITAL-7', type: 'PROGRAM', rule: 'Program register' },
   { raw: 'SOLARIS', type: 'PROGRAM', rule: 'Program register' },
   { raw: 'MERIDIAN PARK', type: 'ADDRESS', rule: 'Facility lexicon' },
@@ -69,11 +83,30 @@ const CODENAMES: Array<{ raw: string; type: EntityType; rule: string }> = [
 
 const PERSON_ALIASES = ['Priya Raman', 'Marcus Vale', 'A. Kaur'];
 
+/** Luhn checksum used to keep the card detector from flagging arbitrary digits. */
+export function luhnValid(raw: string): boolean {
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length < 13 || digits.length > 19) return false;
+  let sum = 0;
+  let double = false;
+  for (let index = digits.length - 1; index >= 0; index -= 1) {
+    let digit = Number(digits[index]);
+    if (double) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+    double = !double;
+  }
+  return sum % 10 === 0;
+}
+
 const PATTERNS: Array<{
   type: EntityType;
   regex: RegExp;
   rule: string;
   confidence: number;
+  validate?: (raw: string) => boolean;
 }> = [
   {
     type: 'EMAIL',
@@ -94,6 +127,37 @@ const PATTERNS: Array<{
     confidence: 0.996,
   },
   {
+    type: 'SSN',
+    regex: /\b(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b/g,
+    rule: 'SSN structure + range guard',
+    confidence: 0.998,
+  },
+  {
+    type: 'MRN',
+    regex: /\bMRN[-:\s]?\d{6,10}\b/gi,
+    rule: 'Medical record prefix',
+    confidence: 0.996,
+  },
+  {
+    type: 'DOB',
+    regex: /\b(?:0[1-9]|1[0-2])\/(?:0[1-9]|[12]\d|3[01])\/(?:19|20)\d{2}\b/g,
+    rule: 'MM/DD/YYYY birth-date shape',
+    confidence: 0.988,
+  },
+  {
+    type: 'CARD',
+    regex: /\b(?:\d[ -]?){13,19}\b/g,
+    rule: 'PAN shape + Luhn checksum',
+    confidence: 0.994,
+    validate: luhnValid,
+  },
+  {
+    type: 'IBAN',
+    regex: /\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b/g,
+    rule: 'IBAN country + check digits',
+    confidence: 0.992,
+  },
+  {
     type: 'IP',
     regex: /\b(?:10|127|192\.168|172\.(?:1[6-9]|2\d|3[01]))(?:\.\d{1,3}){2,3}\b/g,
     rule: 'RFC 1918 private range',
@@ -109,6 +173,11 @@ function tokenPrefix(type: EntityType): string {
   if (type === 'PHONE') return 'PHONE';
   if (type === 'SECRET') return 'SECRET';
   if (type === 'IP') return 'NODE';
+  if (type === 'SSN') return 'SSN';
+  if (type === 'DOB') return 'DOB';
+  if (type === 'MRN') return 'MRN';
+  if (type === 'CARD') return 'CARD';
+  if (type === 'IBAN') return 'IBAN';
   return 'ADDRESS';
 }
 
@@ -170,6 +239,7 @@ export function analyzePayload(text: string): AirlockReport {
     const regex = new RegExp(pattern.regex.source, pattern.regex.flags);
     let match: RegExpExecArray | null;
     while ((match = regex.exec(text)) !== null) {
+      if (pattern.validate && !pattern.validate(match[0])) continue;
       candidates.push({
         raw: match[0],
         type: pattern.type,
@@ -218,20 +288,11 @@ export function analyzePayload(text: string): AirlockReport {
   }
 
   const protectedCharacters = entities.reduce((sum, entity) => sum + entity.raw.length, 0);
-  const riskScore = Math.min(
-    99,
-    Math.round(
-      (entities.filter((entity) => entity.type === 'SECRET').length * 28 +
-        entities.filter((entity) => entity.type === 'CODENAME').length * 18 +
-        entities.filter((entity) => entity.type === 'EMAIL').length * 12 +
-        entities.filter((entity) => entity.type === 'PERSON').length * 10 +
-        entities.filter((entity) => entity.type === 'PHONE').length * 10 +
-        entities.filter((entity) => entity.type === 'IP').length * 8 +
-        entities.filter((entity) => entity.type === 'ADDRESS').length * 6 +
-        entities.filter((entity) => entity.type === 'PROGRAM').length * 8) *
-        1.6,
-    ),
+  const weighted = entities.reduce(
+    (sum, entity) => sum + entityTypeMeta[entity.type].sensitivity,
+    0,
   );
+  const riskScore = Math.min(99, Math.round(weighted * 1.6));
 
   return {
     entities,
@@ -244,6 +305,7 @@ export function analyzePayload(text: string): AirlockReport {
       type: entity.type,
       rule: entity.rule,
     })),
+    ruleCount: CODENAMES.length + PATTERNS.length + PERSON_ALIASES.length,
   };
 }
 

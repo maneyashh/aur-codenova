@@ -20,6 +20,8 @@ import { useStudio } from '../state/studio';
 import { useSimulation } from '../sim/SimulationProvider';
 import { SCREENS, type ScreenId } from '../state/navigation';
 import { PUBLISH_OFFSET_MAX, TODAY, addDays, formatLongDate } from '../core/claims';
+import { buildClearanceReport } from '../core/compiler';
+import { downloadJson } from '../lib/download';
 
 const screenIcons: Record<ScreenId, LucideIcon> = {
   command: Radar,
@@ -51,7 +53,7 @@ export function CommandPalette() {
     setHeatmap,
     pushToast,
   } = useStudio();
-  const { openGateway, restartTour } = useSimulation();
+  const { openGateway, restartTour, scenario } = useSimulation();
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -132,7 +134,9 @@ export function CommandPalette() {
         id: 'action-airlock',
         group: 'ACTIONS',
         label: 'Load airlock test payload',
-        hint: 'Sanitize a sample containing 10 sensitive entities',
+        hint: scenario
+          ? `Sanitize the ${scenario.code} payload containing raw identifiers`
+          : 'Sanitize a sample containing sensitive entities',
         icon: ShieldCheck,
         shortcut: 'A L',
         run: () => {
@@ -152,10 +156,30 @@ export function CommandPalette() {
         icon: FileDown,
         shortcut: 'E M',
         run: () => {
+          const report = buildClearanceReport(scenario, publishOffset);
+          downloadJson(`aura-clearance-${report.asset.id.toLowerCase()}.json`, {
+            schema: 'aura-gov/clearance/v2',
+            runId: report.runId,
+            scenario: report.scenario.id,
+            asset: report.asset,
+            publishDate: report.publishDate,
+            verdict: {
+              score: report.score,
+              label: report.verdictLabel,
+              tone: report.verdictTone,
+              copy: report.verdictCopy,
+            },
+            domains: report.domains,
+            openNotes: report.notes,
+            evidenceHash: report.traceHash,
+            pipeline: report.stages,
+            arbiter: report.arbiter,
+            generatedAt: new Date().toISOString(),
+          });
           setPaletteOpen(false);
           pushToast({
-            title: 'Clearance memo sealed',
-            detail: 'AST-2291 · integrity 91.4 · 2 open notes · SHA-256 attached.',
+            title: 'Clearance memo downloaded',
+            detail: `${report.asset.id} · integrity ${report.score.toFixed(1)} · ${report.notes.length} open notes · SHA-256 attached.`,
             tone: 'clear',
           });
         },
@@ -175,8 +199,8 @@ export function CommandPalette() {
       {
         id: 'sim-tour',
         group: 'SIMULATION',
-        label: 'Restart judge tour',
-        hint: 'Replay the three-step deterministic walkthrough',
+        label: 'Restart guided tour',
+        hint: 'Replay the five-step deterministic walkthrough',
         icon: RotateCcw,
         shortcut: 'S T',
         run: () => restartTour(),
@@ -195,6 +219,7 @@ export function CommandPalette() {
     setPaletteOpen,
     openGateway,
     restartTour,
+    scenario,
   ]);
 
   const filtered = useMemo(() => {

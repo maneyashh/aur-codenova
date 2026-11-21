@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
   CalendarClock,
   Download,
   LockKeyhole,
+  RotateCcw,
   ShieldAlert,
   ShieldCheck,
   Waypoints,
@@ -25,6 +26,7 @@ import {
   type Claim,
   type TemporalEvaluation,
 } from '../core/claims';
+import { downloadJson } from '../lib/download';
 
 const dateTicks = [
   '2026-11-01',
@@ -194,18 +196,73 @@ function EvidenceGraph({
   );
 }
 
+type ClaimOverride = 'quarantined' | 'cleared';
+
+const OVERRIDE_KEY = 'aura-gov.temporal.overrides.v1';
+
+function loadOverrides(): Record<string, ClaimOverride> {
+  if (typeof window === 'undefined' || !window.localStorage) return {};
+  try {
+    const raw = window.localStorage.getItem(OVERRIDE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, ClaimOverride>;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function applyOverride(
+  base: TemporalEvaluation,
+  override: ClaimOverride | undefined,
+): TemporalEvaluation {
+  if (override === 'quarantined') {
+    return {
+      ...base,
+      state: 'EXPIRES_BEFORE_PUBLISH',
+      label: 'QUARANTINED',
+      severity: 'blocked',
+      reason: 'Operator quarantined this claim. It is excluded from the publish bundle until re-authorized.',
+    };
+  }
+  if (override === 'cleared') {
+    return {
+      ...base,
+      state: 'VALID',
+      label: 'CLEARED OVERRIDE',
+      severity: 'clear',
+      reason: 'Operator cleared this claim against the publish instant. The override is recorded in the ledger.',
+    };
+  }
+  return base;
+}
+
 export function TemporalTruth() {
   const { publishOffset, setPublishOffset, pushToast } = useStudio();
   const [selectedId, setSelectedId] = useState('C-109');
+  const [overrides, setOverrides] = useState<Record<string, ClaimOverride>>(() => loadOverrides());
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      window.localStorage.setItem(OVERRIDE_KEY, JSON.stringify(overrides));
+    } catch {
+      // Storage can be unavailable; the in-memory overrides still work.
+    }
+  }, [overrides]);
 
   const publishDate = addDays(TODAY, publishOffset);
   const evaluations = useMemo(
     () =>
-      claims.map((claim) => ({
-        claim,
-        evaluation: evaluateClaim(claim, publishDate),
-      })),
-    [publishDate],
+      claims.map((claim) => {
+        const base = evaluateClaim(claim, publishDate);
+        return {
+          claim,
+          evaluation: applyOverride(base, overrides[claim.id]),
+          overridden: Boolean(overrides[claim.id]),
+        };
+      }),
+    [publishDate, overrides],
   );
 
   const selectedPair =
@@ -241,8 +298,8 @@ export function TemporalTruth() {
         }
         description="A graph-based validity ledger that evaluates every promotional claim at the future publication instant — not at the moment it was written."
         badge={
-          <span className="head-live">
-            <StatusDot tone="acid" pulse /> UTC / DETERMINISTIC
+          <span className="head-live" title="The temporal engine evaluates a pinned simulation date so results are reproducible.">
+            <StatusDot tone="acid" pulse /> SIM DATE {formatShortDate(TODAY)} / UTC
           </span>
         }
         actions={
@@ -250,13 +307,27 @@ export function TemporalTruth() {
             <button
               type="button"
               className="btn btn-ghost"
-              onClick={() =>
+              onClick={() => {
+                downloadJson('aura-temporal-ledger.json', {
+                  schema: 'aura-gov/temporal-ledger/v2',
+                  exportedAt: new Date().toISOString(),
+                  simulationToday: TODAY,
+                  publishDate,
+                  publishOffsetDays: publishOffset,
+                  gate: blocked > 0 ? 'HELD' : 'OPEN',
+                  claims: evaluations.map(({ claim, evaluation, overridden }) => ({
+                    claim,
+                    evaluation,
+                    overridden: Boolean(overridden),
+                  })),
+                  overrides,
+                });
                 pushToast({
-                  title: 'Temporal ledger exported',
-                  detail: `${claims.length} claims · ${totalEvidence} evidence edges · publish gate ${formatLongDate(publishDate)}.`,
+                  title: 'Temporal ledger downloaded',
+                  detail: `${claims.length} claims · ${totalEvidence} evidence edges · gate ${blocked > 0 ? 'HELD' : 'OPEN'} at ${formatLongDate(publishDate)}.`,
                   tone: 'clear',
-                })
-              }
+                });
+              }}
             >
               <Download size={14} strokeWidth={1.7} />
               Export ledger
@@ -278,7 +349,12 @@ export function TemporalTruth() {
           label="Valid at publish"
           value={String(valid).padStart(2, '0')}
           delta="CLEAR"
-          note="C-121 · C-102"
+          note={
+            evaluations
+              .filter((pair) => pair.evaluation.severity === 'clear')
+              .map((pair) => pair.claim.id)
+              .join(' · ') || 'None'
+          }
           spark={[3, 3, 2, 2, 2, 2, 2, valid]}
         />
         <StatCard
@@ -410,7 +486,7 @@ export function TemporalTruth() {
               </span>
             ))}
             <span className="ruler-today" style={{ left: `${todayPct}%` }}>
-              TODAY
+              SIM TODAY
             </span>
           </div>
           <span className="ledger-ruler-label ledger-ruler-label--right">STATE</span>
@@ -439,6 +515,7 @@ export function TemporalTruth() {
                   <span className="claim-text">{claim.text}</span>
                   <span className="claim-meta">
                     {claim.source} · EXP {formatShortDate(claim.expires)}
+                    {overrides[claim.id] ? ` · OVERRIDE ${overrides[claim.id].toUpperCase()}` : ''}
                   </span>
                 </span>
 
@@ -587,38 +664,67 @@ export function TemporalTruth() {
               <Waypoints size={14} strokeWidth={1.7} />
               Request evidence
             </button>
-            <button
-              type="button"
-              className={`btn ${selectedEvaluation.severity === 'blocked' ? 'btn-danger' : 'btn-primary'}`}
-              onClick={() =>
-                pushToast(
-                  selectedEvaluation.severity === 'blocked'
-                    ? {
-                        title: `Claim ${selectedClaim.id} quarantined`,
-                        detail: 'Removed from the publish bundle. Gate remains held for the campaign.',
-                        tone: 'block',
-                      }
-                    : {
-                        title: `Claim ${selectedClaim.id} cleared for ${formatShortDate(publishDate)}`,
-                        detail: 'Validity window and evidence chain verified against the publish instant.',
-                        tone: 'clear',
-                      },
-                )
-              }
-            >
-              {selectedEvaluation.severity === 'blocked' ? (
-                <ShieldAlert size={14} strokeWidth={1.8} />
-              ) : (
-                <ShieldCheck size={14} strokeWidth={1.8} />
-              )}
-              {selectedEvaluation.severity === 'blocked' ? 'Quarantine claim' : 'Clear for publish'}
-              <ArrowRight size={12} className="btn-tail" />
-            </button>
+            {overrides[selectedClaim.id] ? (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setOverrides((current) => {
+                    const next = { ...current };
+                    delete next[selectedClaim.id];
+                    return next;
+                  });
+                  pushToast({
+                    title: `Override cleared · ${selectedClaim.id}`,
+                    detail: 'The claim is back under pure deterministic evaluation.',
+                    tone: 'info',
+                  });
+                }}
+              >
+                <RotateCcw size={14} strokeWidth={1.8} />
+                Reset override
+              </button>
+            ) : (
+              <button
+                type="button"
+                className={`btn ${selectedEvaluation.severity === 'blocked' ? 'btn-danger' : 'btn-primary'}`}
+                onClick={() => {
+                  const next: ClaimOverride =
+                    selectedEvaluation.severity === 'blocked' ? 'quarantined' : 'cleared';
+                  setOverrides((current) => ({ ...current, [selectedClaim.id]: next }));
+                  pushToast(
+                    next === 'quarantined'
+                      ? {
+                          title: `Claim ${selectedClaim.id} quarantined`,
+                          detail: 'Excluded from the publish bundle. The override is persisted and counted in the gate.',
+                          tone: 'block',
+                        }
+                      : {
+                          title: `Claim ${selectedClaim.id} cleared for ${formatShortDate(publishDate)}`,
+                          detail: 'Validity window and evidence chain verified against the publish instant. Override persisted.',
+                          tone: 'clear',
+                        },
+                  );
+                }}
+              >
+                {selectedEvaluation.severity === 'blocked' ? (
+                  <ShieldAlert size={14} strokeWidth={1.8} />
+                ) : (
+                  <ShieldCheck size={14} strokeWidth={1.8} />
+                )}
+                {selectedEvaluation.severity === 'blocked' ? 'Quarantine claim' : 'Clear for publish'}
+                <ArrowRight size={12} className="btn-tail" />
+              </button>
+            )}
           </div>
 
           <div className="inspector-foot">
             <LockKeyhole size={11} strokeWidth={1.7} />
-            <span>Decisions are written to the signed temporal ledger.</span>
+            <span>
+              {overrides[selectedClaim.id]
+                ? `Operator override active · ${overrides[selectedClaim.id]} · persisted locally.`
+                : 'Decisions are written to the signed temporal ledger.'}
+            </span>
           </div>
         </Panel>
       </div>

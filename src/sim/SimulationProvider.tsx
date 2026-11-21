@@ -9,6 +9,7 @@ import {
 } from 'react';
 import type { ReactNode } from 'react';
 import { useStudio } from '../state/studio';
+import { surgicalFidelity } from '../core/voice';
 import { SCENARIOS, TOUR_STEPS } from './scenarios';
 import type { Scenario, ScenarioId, SimPhase, TourStep } from './types';
 
@@ -27,6 +28,7 @@ type SimulationContextValue = {
   switchScenario: (id: ScenarioId) => void;
   openGateway: () => void;
   closeGateway: () => void;
+  enterFreeExplore: () => void;
   nextStep: () => void;
   skipTour: () => void;
   restartTour: () => void;
@@ -58,18 +60,27 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const selectScenario = useCallback(
+  /** Hydrate dataset state without deciding where the operator should land. */
+  const hydrateScenario = useCallback(
     (id: ScenarioId) => {
       const next = SCENARIOS[id];
       if (scanTimer.current) window.clearTimeout(scanTimer.current);
       setScenarioId(id);
-      setPhase('tour');
-      setStepIndex(0);
       setScanRequested(false);
       setPipelineComplete(false);
       setPaletteOpen(false);
       setPublishOffset(next.publishOffset);
       setHeatmap(id === 'visual');
+      return next;
+    },
+    [setHeatmap, setPaletteOpen, setPublishOffset],
+  );
+
+  const selectScenario = useCallback(
+    (id: ScenarioId) => {
+      const next = hydrateScenario(id);
+      setPhase('tour');
+      setStepIndex(0);
       navigate('command');
       pushToast({
         title: `${next.code} hydrated · ${next.asset.name}`,
@@ -77,7 +88,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
         tone: 'clear',
       });
     },
-    [navigate, pushToast, setHeatmap, setPaletteOpen, setPublishOffset],
+    [hydrateScenario, navigate, pushToast],
   );
 
   const switchScenario = useCallback(
@@ -112,6 +123,18 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   const closeGateway = useCallback(() => {
     setPhase((current) => (current === 'gateway' && scenarioId ? 'free' : current));
   }, [scenarioId]);
+
+  /** Let a visitor bypass the scripted walkthrough and keep the same dataset. */
+  const enterFreeExplore = useCallback(() => {
+    if (!scenarioId) {
+      // Hydrate the default dataset but honour the current deep link: a judge
+      // opening #/temporal must not be thrown back to the command deck.
+      hydrateScenario('visual');
+      setPhase('free');
+      return;
+    }
+    setPhase('free');
+  }, [hydrateScenario, scenarioId]);
 
   const markPipelineStarted = useCallback(() => {
     setScanRequested(true);
@@ -149,9 +172,10 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
 
     setPhase('free');
     navigate('voice');
+    window.dispatchEvent(new CustomEvent('aura:voice-patch'));
     pushToast({
-      title: 'Surgical patch staged · 94.8 fidelity',
-      detail: 'Six lexical swaps, zero sentences regenerated. Authorise the patch to seal remediation.',
+      title: `Surgical patch staged · ${surgicalFidelity.score.toFixed(1)} fidelity`,
+      detail: 'Six lexical swaps, zero sentences regenerated. Authorize the patch to seal remediation.',
       tone: 'clear',
     });
   }, [
@@ -213,6 +237,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       switchScenario,
       openGateway,
       closeGateway,
+      enterFreeExplore,
       nextStep,
       skipTour,
       restartTour,
@@ -229,6 +254,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       switchScenario,
       openGateway,
       closeGateway,
+      enterFreeExplore,
       nextStep,
       skipTour,
       restartTour,

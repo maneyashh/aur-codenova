@@ -15,6 +15,8 @@ import type { LucideIcon } from 'lucide-react';
 import { AuraLogo } from './Logo';
 import { SCREENS, type ScreenId } from '../state/navigation';
 import { useStudio } from '../state/studio';
+import { useScenario } from '../sim/SimulationProvider';
+import { analyzePayload } from '../core/airlock';
 import { claims, evaluateClaim, addDays, TODAY } from '../core/claims';
 import { StatusDot } from './ui';
 
@@ -28,6 +30,7 @@ const navIcons: Record<ScreenId, LucideIcon> = {
 
 export function Sidebar() {
   const { screen, navigate, setPaletteOpen, publishOffset } = useStudio();
+  const scenario = useScenario();
 
   const badges = useMemo(() => {
     const publishDate = addDays(TODAY, publishOffset);
@@ -36,14 +39,24 @@ export function Sidebar() {
       return evaluation.severity === 'blocked';
     }).length;
 
+    if (!scenario) {
+      return {
+        command: 0,
+        visual: 0,
+        temporal: temporalFlags,
+        voice: 0,
+        airlock: 0,
+      } as Record<ScreenId, number>;
+    }
+
     return {
       command: 0,
-      visual: 2,
+      visual: scenario.visual.findings.length,
       temporal: temporalFlags,
-      voice: 6,
-      airlock: 10,
+      voice: scenario.voiceVariant === 'llm' ? 1 : 6,
+      airlock: analyzePayload(scenario.airlockPayload).entities.length,
     } as Record<ScreenId, number>;
-  }, [publishOffset]);
+  }, [publishOffset, scenario]);
 
   return (
     <aside className="sidebar">
@@ -52,7 +65,7 @@ export function Sidebar() {
         <div className="brand-build">
           <span>v3.0</span>
           <span className="brand-build-sep">/</span>
-          <span>FINAL ROUND</span>
+          <span>DETERMINISTIC CORE</span>
         </div>
       </div>
 

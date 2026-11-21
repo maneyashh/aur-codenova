@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowUpRight,
   ChevronDown,
@@ -9,18 +9,22 @@ import {
   ShieldCheck,
   SlidersHorizontal,
 } from 'lucide-react';
-import { Badge, Meter, Panel, PanelHead, RingGauge, ScreenHead, StatusDot } from '../components/ui';
-import { useStudio } from '../state/studio';
 import {
-  a11yChecks,
-  brandProfile,
-  geometryChecks,
-  palette,
-  visualFindings,
-} from '../data/brand';
-import { DEFAULT_POSTER, paletteForScenario } from '../sim/scenarios';
+  Badge,
+  Meter,
+  Panel,
+  PanelHead,
+  RingGauge,
+  ScreenHead,
+  StatusDot,
+  Toggle,
+} from '../components/ui';
+import { useStudio } from '../state/studio';
+import { brandProfile, type AccessibilityCheck } from '../data/brand';
 import { useScenario } from '../sim/SimulationProvider';
 import type { PosterTheme } from '../sim/types';
+import { buildClearanceReport } from '../core/compiler';
+import { downloadJson } from '../lib/download';
 import {
   BRAND_BASELINE_HEX,
   BRAND_BASELINE_TOKEN,
@@ -35,9 +39,10 @@ type PosterProps = {
   geometry: boolean;
   probes: boolean;
   theme: PosterTheme;
+  a11y: AccessibilityCheck[];
 };
 
-function PosterArtifact({ heatmap, geometry, probes, theme }: PosterProps) {
+function PosterArtifact({ heatmap, geometry, probes, theme, a11y }: PosterProps) {
   const t = theme;
   return (
     <svg
@@ -449,7 +454,7 @@ function PosterArtifact({ heatmap, geometry, probes, theme }: PosterProps) {
         {/* Accessibility heatmap */}
         {heatmap ? (
           <g className="overlay-heatmap">
-            {a11yChecks.map((check) => (
+            {a11y.map((check) => (
               <g key={check.id}>
                 <rect
                   x={check.region.x}
@@ -534,31 +539,51 @@ type RadarEvent = { id: number; text: string; tone: 'acid' | 'amber' | 'red' };
 const verdictTone = { PASS: 'acid', REVIEW: 'amber', FAIL: 'red' } as const;
 
 export function VisualForensics() {
-  const { heatmap, setHeatmap, pushToast } = useStudio();
+  const { heatmap, setHeatmap, pushToast, publishOffset } = useStudio();
   const scenario = useScenario();
   const [geometry, setGeometry] = useState(true);
   const [probes, setProbes] = useState(true);
   const [scanning, setScanning] = useState(false);
+  const [autoQuarantine, setAutoQuarantine] = useState(true);
   const scanTimer = useRef<number | null>(null);
+  const autoTimer = useRef<number | null>(null);
 
   const sandboxRef = useRef<HTMLDivElement | null>(null);
   const radarRef = useRef<DomRadar | null>(null);
+  const autoQuarantineRef = useRef(autoQuarantine);
   const eventSeq = useRef(0);
   const [reading, setReading] = useState<DriftReading | null>(null);
   const [events, setEvents] = useState<RadarEvent[]>([]);
 
-  const theme = scenario?.poster ?? DEFAULT_POSTER;
-  const activePalette = paletteForScenario(scenario);
-  const findings = scenario?.visual.findings ?? visualFindings;
-  const score = scenario?.visual.score ?? 91.4;
+  const report = useMemo(
+    () => buildClearanceReport(scenario, publishOffset),
+    [scenario, publishOffset],
+  );
+  const theme = report.visual.theme;
+  const activePalette = report.visual.palette;
+  const findings = report.visual.findings;
+  const a11y = report.visual.a11y;
+  const geometryChecks = report.visual.geometry;
+  const score = report.visual.score;
   const scoreTone: 'amber' | 'red' = score >= 90 ? 'amber' : 'red';
-  const asset = scenario?.asset ?? brandProfile.asset;
-  const readoutState = scenario?.visual.state ?? 'CLEAR WITH NOTES';
+  const asset = report.asset;
+  const readoutState = report.verdictLabel;
   const readoutCopy =
-    scenario?.visual.copy ??
-    'One geometry breach, one non-text contrast failure. No generative inference was performed.';
-  const readoutStamp = scenario?.visual.stamp ?? 'PASS 128ms · 41 RULES';
+    report.visual.a11yFails > 0 || report.visual.geometryFails > 0
+      ? `${report.visual.a11yFails} WCAG contrast failure${report.visual.a11yFails === 1 ? '' : 's'} and ${report.visual.geometryFails} geometry breach${report.visual.geometryFails === 1 ? '' : 'es'} measured against the stored contract. No generative inference was performed.`
+      : 'Every sampled surface is inside the stored contract. No generative inference was performed.';
+  const readoutStamp = `${report.stages.find((stage) => stage.id === 'visual')?.ms ?? 128}ms · ${activePalette.length + a11y.length + geometryChecks.length} RULES`;
   const passMs = readoutStamp.match(/\d+ms/)?.[0] ?? '128ms';
+
+  useEffect(() => {
+    autoQuarantineRef.current = autoQuarantine;
+    // Turning autonomy off cancels any pending revert so the drift stays on
+    // screen for inspection.
+    if (!autoQuarantine && autoTimer.current) {
+      window.clearTimeout(autoTimer.current);
+      autoTimer.current = null;
+    }
+  }, [autoQuarantine]);
 
   useEffect(
     () => () => {
@@ -580,20 +605,41 @@ export function VisualForensics() {
           ? `contract restored in ${next.detectMs.toFixed(2)}ms`
           : next.kind === 'dom-node'
             ? `caught in ${next.detectMs.toFixed(2)}ms · ${next.detail}`
-            : `caught in ${next.detectMs.toFixed(2)}ms · ΔE ${next.deltaE.toFixed(1)} · ${next.contrast.toFixed(2)}:1 ${next.wcagPass ? 'PASS' : 'FAIL'}`;
+            : next.kind === 'layout'
+              ? `caught in ${next.detectMs.toFixed(2)}ms · geometry drift ${next.layoutDrift.toFixed(1)}px`
+              : `caught in ${next.detectMs.toFixed(2)}ms · ΔE ${next.deltaE.toFixed(1)} · ${next.contrast.toFixed(2)}:1 ${next.wcagPass ? 'PASS' : 'FAIL'}`;
       setEvents((current) =>
-        [{ id, text: `${next.trigger} · ${metric}`, tone: verdictTone[next.verdict] }, ...current].slice(0, 5),
+        [{ id, text: `${next.trigger} · ${metric}`, tone: verdictTone[next.verdict] }, ...current].slice(0, 6),
       );
+      if (
+        autoQuarantineRef.current &&
+        next.verdict === 'FAIL' &&
+        next.trigger !== 'QUARANTINE'
+      ) {
+        // Hold the FAIL reading long enough to be inspected, then let the
+        // surgical revert emit its own QUARANTINE event.
+        if (autoTimer.current) window.clearTimeout(autoTimer.current);
+        autoTimer.current = window.setTimeout(() => {
+          autoTimer.current = null;
+          radarRef.current?.quarantine();
+        }, 1800);
+      }
     });
     radarRef.current = radar;
     setReading(radar.measureNow());
     return () => {
       radar.disconnect();
+      if (autoTimer.current) window.clearTimeout(autoTimer.current);
+      autoTimer.current = null;
       radarRef.current = null;
     };
   }, []);
 
   const quarantine = () => {
+    if (autoTimer.current) {
+      window.clearTimeout(autoTimer.current);
+      autoTimer.current = null;
+    }
     radarRef.current?.quarantine();
     pushToast({
       title: 'DOM quarantined · brand contract restored',
@@ -612,7 +658,7 @@ export function VisualForensics() {
       setProbes(true);
       pushToast({
         title: `Forensic pass complete · ${passMs}`,
-        detail: `${activePalette.length} colour anchors, 4 geometry constraints and ${a11yChecks.length} contrast regions evaluated.`,
+        detail: `${activePalette.length} colour anchors, ${geometryChecks.length} geometry constraints and ${a11y.length} contrast regions evaluated.`,
         tone: 'watch',
       });
     }, 1800);
@@ -646,13 +692,27 @@ export function VisualForensics() {
             <button
               type="button"
               className="btn btn-ghost"
-              onClick={() =>
+              onClick={() => {
+                downloadJson(`aura-forensic-${asset.id.toLowerCase()}.json`, {
+                  schema: 'aura-gov/visual-forensics/v2',
+                  exportedAt: new Date().toISOString(),
+                  asset,
+                  scenario: report.scenario.id,
+                  contract: brandProfile.policySet,
+                  score,
+                  verdict: report.verdictLabel,
+                  palette: activePalette,
+                  geometry: geometryChecks,
+                  accessibility: a11y,
+                  findings,
+                  evidenceHash: report.traceHash,
+                });
                 pushToast({
-                  title: 'Forensic report generated',
-                  detail: `${asset.id} · ${findings.length} findings · signed PDF + JSON evidence bundle.`,
+                  title: 'Forensic report downloaded',
+                  detail: `${asset.id} · ${findings.length} findings · ${a11y.length} WCAG regions · SHA-256 ${report.traceHashShort}.`,
                   tone: 'clear',
-                })
-              }
+                });
+              }}
             >
               <Download size={14} strokeWidth={1.7} />
               Export report
@@ -716,7 +776,7 @@ export function VisualForensics() {
 
           <div className="specimen-stage">
             <div className="poster-frame">
-              <PosterArtifact heatmap={heatmap} geometry={geometry} probes={probes} theme={theme} />
+              <PosterArtifact heatmap={heatmap} geometry={geometry} probes={probes} theme={theme} a11y={a11y} />
               {scanning ? (
                 <div className="scan-overlay" aria-hidden="true">
                   <span className="scan-line" />
@@ -839,7 +899,7 @@ export function VisualForensics() {
               <span className="section-meta">WCAG 2.2</span>
             </div>
             <div className="a11y-list">
-              {a11yChecks.map((check) => (
+              {a11y.map((check) => (
                 <button
                   type="button"
                   className={`a11y-row ${check.pass ? '' : 'is-fail'}`}
@@ -887,14 +947,22 @@ export function VisualForensics() {
       <div className="dr-wrap" data-tour="dom-radar">
         <Panel className="dr-panel" bracket>
           <PanelHead
-            kicker="Round 3 · Improvement 02"
-            title="Continuous DOM Drift Radar (Live MutationObserver)"
+            kicker="Continuous defense · live MutationObserver"
+            title="DOM Drift Radar"
             meta={`BASELINE ${BRAND_BASELINE_TOKEN} ${BRAND_BASELINE_HEX}`}
             actions={
-              <span className="meta-live">
-                <StatusDot tone={drifting ? 'red' : 'acid'} pulse />
-                {drifting ? 'DRIFT DETECTED' : 'WATCHING'}
-              </span>
+              <>
+                <Toggle
+                  checked={autoQuarantine}
+                  onChange={setAutoQuarantine}
+                  label="Auto-quarantine"
+                  compact
+                />
+                <span className="meta-live">
+                  <StatusDot tone={drifting ? 'red' : 'acid'} pulse />
+                  {drifting ? 'DRIFT DETECTED' : 'WATCHING'}
+                </span>
+              </>
             }
           />
 
@@ -973,6 +1041,24 @@ export function VisualForensics() {
                     ) : null}
                   </em>
                 </div>
+                <div className="dr-metric">
+                  <span>LAYOUT DRIFT</span>
+                  <strong className={reading && reading.layoutDrift > 2 ? 'text-red' : ''}>
+                    {reading ? `${reading.layoutDrift.toFixed(1)}px` : '—'}
+                  </strong>
+                  <em>tolerance 2px</em>
+                </div>
+                <div className="dr-metric">
+                  <span>WORST SURFACE</span>
+                  <strong className="dr-surface">
+                    {reading ? reading.worstContrast.offender : '—'}
+                  </strong>
+                  <em>
+                    {reading
+                      ? `${reading.worstContrast.contrast.toFixed(2)}:1 ${reading.wcagPass ? 'PASS' : 'FAIL'}`
+                      : ''}
+                  </em>
+                </div>
               </div>
 
               <div className="dr-log" aria-live="polite">
@@ -997,11 +1083,12 @@ export function VisualForensics() {
 
       <div className="page-footline">
         <span>
-          <StatusDot tone="acid" /> MATHEMATICAL PASS · NO VISION MODEL INVOKED
+          <StatusDot tone={report.verdictTone === 'red' ? 'red' : report.verdictTone === 'amber' ? 'amber' : 'acid'} />
+          {report.verdictLabel} · NO VISION MODEL INVOKED
         </span>
         <span>ICC sRGB v4</span>
         <span>THRESHOLD ΔE ≤ 2.5 PASS / ≤ 5 REVIEW</span>
-        <span className="footline-right">HASH 9F2C…C41A</span>
+        <span className="footline-right">SHA-256 {report.traceHashShort}</span>
       </div>
     </div>
   );

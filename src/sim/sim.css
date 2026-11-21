@@ -534,7 +534,9 @@
 .tour-layer {
   position: fixed;
   inset: 0;
-  z-index: 150;
+  /* Above the gateway so the first tour click cannot be swallowed by its
+     exit animation, which stays mounted for a few hundred milliseconds. */
+  z-index: 210;
   pointer-events: none;
 }
 
@@ -601,7 +603,7 @@
 
 .tour-card {
   position: fixed;
-  z-index: 151;
+  z-index: 211;
   max-width: calc(100vw - 24px);
   padding: 17px 18px 14px;
   border-radius: 18px;

@@ -1,3 +1,4 @@
+@import './fonts.css';
 @import './tokens.css';
 @import './shell.css';
 @import './ui.css';
@@ -6,7 +7,9 @@
 @import './temporal.css';
 @import './voice.css';
 @import './airlock.css';
-@import './responsive.css';
 @import '../sim/sim.css';
-
 @import './round3.css';
+/* Responsive and legibility overrides are intentionally last: they must win
+   over the base and round-3 component rules at small widths. */
+@import './responsive.css';
+@import './legibility.css';

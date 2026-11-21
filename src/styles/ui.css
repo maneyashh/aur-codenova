@@ -443,6 +443,10 @@ kbd,
   margin-top: 3px;
 }
 .ring-sub {
+  max-width: 76%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-family: var(--font-mono);
   font-size: 5.1px;
   letter-spacing: 0.09em;
